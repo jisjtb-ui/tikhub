@@ -6,6 +6,7 @@ import { createLogger, color } from './logger.js';
 import { createPrinter } from './printer.js';
 import { resolveTarget, TargetResolutionError } from './target.js';
 import { createTikTokSource } from './sources/tiktok.js';
+import { createBridge } from './bridge.js';
 import { createMockSource } from './sources/mock.js';
 
 const USAGE = `
@@ -30,6 +31,7 @@ const USAGE = `
   --extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
   --wait=SECONDS      配信開始まで待機する秒数
   --duration=SECONDS  指定秒数で自動終了する
+  --serve[=PORT]      ゲーム画面へイベントを中継する (既定 8787)
   --log-level=LEVEL   debug | info | warn | error
 `.trim();
 
@@ -109,7 +111,25 @@ async function main() {
   logger.raw(color.dim(`  署名 API キー: ${config.signApiKey ? '設定あり' : '未設定 (無料枠)'}`));
   logger.raw('');
 
-  source.emitter.on('event', (event, raw) => printer.handle(event, raw));
+  // --serve を付けたときだけ、ゲーム画面へイベントを中継するサーバーを立てる。
+  // 付けなければポートは開かず、これまでどおりコンソール表示だけで動く。
+  let bridge = null;
+  if (config.servePort) {
+    bridge = createBridge({ port: config.servePort, host: config.serveHost, logger });
+    try {
+      await bridge.start();
+      logger.info(color.green(`ゲーム画面への中継を開始しました: http://${config.serveHost}:${config.servePort}/events`));
+      logger.info(color.dim("  ゲーム側のコンソールで  KVB.tiktok.connect('http://" + config.serveHost + ':' + config.servePort + "/events')"));
+    } catch (err) {
+      logger.error(`中継サーバーを開始できませんでした: ${err.message}`);
+      bridge = null;
+    }
+  }
+
+  source.emitter.on('event', (event, raw) => {
+    printer.handle(event, raw);
+    bridge?.broadcast(event);
+  });
 
   source.emitter.on('connected', ({ roomId }) => {
     logger.info(color.green(`接続しました (roomId: ${roomId})`));
@@ -135,6 +155,7 @@ async function main() {
     } catch {
       // 切断時のエラーは終了処理を妨げない
     }
+    await bridge?.close();
     logger.raw(printer.summary());
     process.exit(0);
   };

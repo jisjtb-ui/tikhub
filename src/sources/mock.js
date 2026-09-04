@@ -73,7 +73,9 @@ export function createMockSource({ intervalMs = 1_500, logger } = {}) {
   }
 
   function emitChat() {
-    const raw = { user: pick(USERS), comment: pick(['かわいい！', 'beautiful!', 'がんばれー', '888']) };
+    // 'A' / 'B' はゲーム側のチーム振り分けに使われるコメント。
+    // オフラインのままチーム選択まで確認できるように混ぜてある。
+    const raw = { user: pick(USERS), comment: pick(['A', 'B', 'かわいい！', 'beautiful!', 'がんばれー', '888']) };
     emitter.emit('event', normalizeChat(raw), raw);
   }
 

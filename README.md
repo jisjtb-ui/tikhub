@@ -76,6 +76,7 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 --extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
 --wait=SECONDS      配信開始まで待機する秒数 (例: --wait=600)
 --duration=SECONDS  指定秒数で自動終了する
+--serve[=PORT]      受信したイベントをゲーム画面へ中継する (既定 8787)
 --log-level=LEVEL   debug | info | warn | error
 ```
 
@@ -87,6 +88,8 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 | `SIGN_API_KEY` | 署名サーバー [Euler Stream](https://www.eulerstream.com) の API キー。**未設定でも無料枠で動作します** |
 | `SIGN_API_URL` | 署名サーバーのベース URL。未設定なら `https://api.eulerstream.com` |
 | `WAIT_UNTIL_LIVE_SECONDS` | まだ配信中でないとき、開始を待つ秒数 (0 = 待たない) |
+| `BRIDGE_PORT` | 中継サーバーのポート (`--serve` と同じ。未設定なら中継しない) |
+| `BRIDGE_HOST` | 中継サーバーの待ち受けアドレス。既定 `127.0.0.1` |
 | `EXTENDED_GIFT_INFO` | `true` でギフト一覧も取得する。**Euler Stream の有料プランが必要**。既定は `false` |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 | `TIMESTAMPS` | `true` で各行に時刻を付ける |
@@ -191,6 +194,39 @@ TikTok LIVE Event Server
 
 ---
 
+## ゲーム画面への中継
+
+`--serve` を付けると、受信したイベントをブラウザへ流す小さなサーバーが立ちます。
+KAWAII vs BEAUTIFUL のゲーム画面はここにつなぎます。
+
+```bash
+npm start -- <LIVE の URL> --serve
+#  → ゲーム画面への中継を開始しました: http://127.0.0.1:8787/events
+```
+
+ゲーム画面 (ブラウザ) のコンソールで:
+
+```js
+KVB.tiktok.connect('http://127.0.0.1:8787/events');
+```
+
+- **`--serve` を付けなければポートは開きません。** これまでどおりコンソール表示だけで動きます。
+- WebSocket ではなく **SSE (Server-Sent Events)** です。サーバー → ブラウザの一方向だけで
+  足りるため、追加の依存パッケージなしで動き、切断時の再接続はブラウザ側が自前で行います。
+- 流すのは `printer` が表示するのと同じ正規化済みイベントです。
+  連打ギフトは**確定した 1 件だけ**を送るので、ゲーム側で二重に加算されません。
+- 既定では `127.0.0.1` にだけ待ち受けます。別端末から見たい場合は
+  `BRIDGE_HOST=0.0.0.0` を指定してください (同一 LAN に公開されます)。
+
+疎通確認:
+
+```bash
+curl http://127.0.0.1:8787/health        # {"ok":true,"clients":1}
+curl -N http://127.0.0.1:8787/events     # イベントが流れてくる
+```
+
+---
+
 ## 構成
 
 ```
@@ -201,6 +237,7 @@ src/
   logger.js         ログ出力
   events.js         受信ペイロードを共通の形へ正規化する
   printer.js        1 行 1 イベントの整形表示とセッション集計
+  bridge.js         ゲーム画面へイベントを中継する SSE サーバー (--serve のときだけ)
   doctor.js         環境チェック
   resolve.js        接続先の解決のみを実行する
   sources/

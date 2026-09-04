@@ -30,7 +30,7 @@ function parseIntOr(value, fallback) {
  *   node src/index.js https://vt.tiktok.com/XXXXXXXX/
  */
 export function parseArgs(argv = process.argv.slice(2)) {
-  const args = { target: null, mock: false, raw: null, logLevel: null, wait: null, duration: null, timestamps: false, extendedGiftInfo: false };
+  const args = { target: null, mock: false, raw: null, logLevel: null, wait: null, duration: null, timestamps: false, extendedGiftInfo: false, serve: null };
 
   for (const arg of argv) {
     if (arg === '--mock') args.mock = true;
@@ -40,6 +40,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--log-level=')) args.logLevel = arg.slice('--log-level='.length);
     else if (arg.startsWith('--wait=')) args.wait = parseIntOr(arg.slice('--wait='.length), null);
     else if (arg.startsWith('--duration=')) args.duration = parseIntOr(arg.slice('--duration='.length), null);
+    else if (arg === '--serve') args.serve = 8787;
+    else if (arg.startsWith('--serve=')) args.serve = parseIntOr(arg.slice('--serve='.length), 8787);
     else if (arg.startsWith('--user=')) args.target = arg.slice('--user='.length);
     else if (!arg.startsWith('-')) args.target = arg;
   }
@@ -76,5 +78,8 @@ export function buildConfig(argv) {
     timestamps: args.timestamps || parseBool(process.env.TIMESTAMPS, false),
     // 0 より大きいとその秒数で自動終了する (動作確認用)
     durationSeconds: args.duration ?? parseIntOr(process.env.DURATION_SECONDS, 0),
+    // 指定するとゲーム画面へイベントを中継する SSE サーバーを立てる (null = 立てない)
+    servePort: args.serve ?? parseIntOr(process.env.BRIDGE_PORT, null),
+    serveHost: process.env.BRIDGE_HOST?.trim() || '127.0.0.1',
   };
 }
