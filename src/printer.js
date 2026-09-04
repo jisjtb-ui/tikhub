@@ -2,56 +2,83 @@ import { inspect } from 'node:util';
 import { color } from './logger.js';
 import { EventType } from './events.js';
 
-const LABELS = {
-  [EventType.GIFT]: color.magenta('[GIFT  ]'),
-  [EventType.FOLLOW]: color.green('[FOLLOW]'),
-  [EventType.LIKE]: color.red('[LIKE  ]'),
-  [EventType.CHAT]: color.cyan('[CHAT  ]'),
-  [EventType.SHARE]: color.yellow('[SHARE ]'),
-  [EventType.MEMBER]: color.dim('[JOIN  ]'),
-  [EventType.VIEWER]: color.dim('[VIEWER]'),
+/**
+ * 出力形式は 1 行 1 イベントの `key=value` 形式で固定する。
+ *
+ *   [GIFT] user=xxx gift=xxx count=1 diamonds=5
+ *   [LIKE] user=xxx count=10 total=48120
+ *   [FOLLOW] user=xxx
+ *   [COMMENT] user=xxx text=xxx
+ *
+ * 目視でも grep でも読めるようにするため、色はタグ部分にしか付けない。
+ */
+const TAGS = {
+  [EventType.GIFT]: ['GIFT', color.magenta],
+  [EventType.FOLLOW]: ['FOLLOW', color.green],
+  [EventType.LIKE]: ['LIKE', color.red],
+  [EventType.CHAT]: ['COMMENT', color.cyan],
+  [EventType.SHARE]: ['SHARE', color.yellow],
+  [EventType.MEMBER]: ['JOIN', color.dim],
+  [EventType.VIEWER]: ['VIEWER', color.dim],
 };
 
 const num = (n) => Number(n).toLocaleString('ja-JP');
 
-function who(user) {
-  if (!user) return '';
-  const handle = color.bold(`@${user.uniqueId}`);
-  return user.nickname && user.nickname !== user.uniqueId ? `${handle} (${user.nickname})` : handle;
+/** 改行は 1 行 1 イベントを崩すので潰す */
+const oneLine = (text) => String(text ?? '').replace(/\s*\n\s*/g, ' ');
+
+/** value が null/undefined のフィールドは出力しない */
+function fields(pairs) {
+  return pairs
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}=${value}`)
+    .join(' ');
 }
 
-function describe(event) {
+function body(event) {
+  const user = event.user?.uniqueId ?? null;
+
   switch (event.type) {
-    case EventType.GIFT: {
-      const streak = event.streakable && !event.finished ? color.dim(' …連打中') : '';
-      return `${who(event.user)} が ${color.bold(event.giftName)} x${event.repeatCount}`
-        + ` (${num(event.totalDiamonds)} diamonds)${streak}`;
-    }
-    case EventType.FOLLOW: {
-      const total = event.totalFollowers != null ? color.dim(` [配信者フォロワー ${num(event.totalFollowers)}]`) : '';
-      return `${who(event.user)} がフォローしました${total}`;
-    }
-    case EventType.LIKE: {
-      const total = event.totalLikes != null ? color.dim(` [ルーム累計 ${num(event.totalLikes)}]`) : '';
-      return `${who(event.user)} が いいね x${num(event.count)}${total}`;
-    }
+    case EventType.GIFT:
+      return fields([
+        ['user', user],
+        ['gift', event.giftName],
+        ['count', event.repeatCount],
+        ['diamonds', event.totalDiamonds],
+      ]);
+    case EventType.FOLLOW:
+      return fields([['user', user]]);
+    case EventType.LIKE:
+      return fields([
+        ['user', user],
+        ['count', event.count],
+        ['total', event.totalLikes],
+      ]);
     case EventType.CHAT:
-      return `${who(event.user)}: ${event.comment}`;
+      return fields([
+        ['user', user],
+        ['text', oneLine(event.comment)],
+      ]);
     case EventType.SHARE:
-      return `${who(event.user)} がシェアしました`;
     case EventType.MEMBER:
-      return `${who(event.user)} が入室しました`;
+      return fields([['user', user]]);
     case EventType.VIEWER:
-      return `視聴者数 ${num(event.viewerCount)}`;
+      return fields([['count', event.viewerCount]]);
     default:
       return inspect(event, { depth: 3, colors: false });
   }
 }
 
+/** 1 イベント = 1 行の文字列を組み立てる (テストしやすいよう副作用なし) */
+export function formatEvent(event) {
+  const [name, paint] = TAGS[event.type] ?? [event.type.toUpperCase(), (t) => t];
+  return `${paint(`[${name}]`)} ${body(event)}`;
+}
+
 /**
  * 正規化済みイベントをコンソールへ出力し、あわせて集計を取る。
  */
-export function createPrinter({ logger, dumpRaw = false }) {
+export function createPrinter({ logger, dumpRaw = false, timestamps = false }) {
   const stats = {
     startedAt: Date.now(),
     counts: Object.fromEntries(Object.values(EventType).map((t) => [t, 0])),
@@ -64,12 +91,13 @@ export function createPrinter({ logger, dumpRaw = false }) {
   function handle(event, raw) {
     // 連打ギフトの途中経過は debug のときだけ出す (通常は確定時の 1 行のみ)
     const isInterimGift = event.type === EventType.GIFT && !event.finished;
-    const label = LABELS[event.type] ?? color.dim(`[${event.type}]`);
+    const line = formatEvent(event);
+    const prefix = timestamps ? `${color.dim(new Date().toLocaleTimeString('ja-JP', { hour12: false }))} ` : '';
 
     if (isInterimGift) {
-      logger.debug(`${label} ${describe(event)}`);
+      logger.debug(`${line} ${color.dim('(連打中)')}`);
     } else {
-      logger.event(label, describe(event));
+      logger.line(`${prefix}${line}`);
     }
 
     if (dumpRaw && raw !== undefined) {
@@ -87,20 +115,19 @@ export function createPrinter({ logger, dumpRaw = false }) {
 
   function summary() {
     const seconds = Math.round((Date.now() - stats.startedAt) / 1000);
-    const lines = [
+    return [
       '',
       color.bold('===== セッション集計 ====='),
       `接続時間      : ${seconds} 秒`,
       `ギフト        : ${num(stats.counts[EventType.GIFT])} 件 / ${num(stats.diamonds)} diamonds`,
-      `フォロー      : ${num(stats.counts[EventType.FOLLOW])} 件 (ユニーク ${num(stats.followers.size)} 人)`,
       `いいね        : ${num(stats.counts[EventType.LIKE])} 回 / ${num(stats.likes)} 個`,
+      `フォロー      : ${num(stats.counts[EventType.FOLLOW])} 件 (ユニーク ${num(stats.followers.size)} 人)`,
       `コメント      : ${num(stats.counts[EventType.CHAT])} 件`,
       `シェア        : ${num(stats.counts[EventType.SHARE])} 件`,
       `入室          : ${num(stats.counts[EventType.MEMBER])} 件`,
       `最大視聴者数  : ${num(stats.peakViewers)}`,
       color.bold('=========================='),
-    ];
-    return lines.join('\n');
+    ].join('\n');
   }
 
   return { handle, summary, stats };

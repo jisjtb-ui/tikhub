@@ -4,22 +4,29 @@ import process from 'node:process';
 import { buildConfig, loadDotEnv } from './config.js';
 import { createLogger, color } from './logger.js';
 import { createPrinter } from './printer.js';
+import { resolveTarget, TargetResolutionError } from './target.js';
 import { createTikTokSource } from './sources/tiktok.js';
 import { createMockSource } from './sources/mock.js';
 
 const USAGE = `
 使い方:
-  node src/index.js [ユーザー名] [オプション]
+  node src/index.js [接続先] [オプション]
+
+接続先はユーザー名でも URL でもよい:
+  @username
+  https://www.tiktok.com/@username/live
+  https://vt.tiktok.com/XXXXXXXX/        (共有用の短縮 URL。自動で展開します)
 
 例:
-  node src/index.js @tiktok            指定ユーザーの LIVE に接続
-  node src/index.js --mock             TikTok に繋がず、擬似イベントで表示を確認
-  node src/index.js @tiktok --raw      生ペイロードも出力 (要 --log-level=debug)
-  node src/index.js @tiktok --wait=600 まだ配信中でなければ最大 600 秒待つ
+  node src/index.js @tiktok
+  node src/index.js https://vt.tiktok.com/XXXXXXXX/
+  node src/index.js --mock                    TikTok に繋がず、擬似イベントで表示を確認
+  node src/index.js @tiktok --wait=600         配信開始まで最大 600 秒待つ
 
 オプション:
   --mock              モックモード (ネットワーク接続なし)
-  --raw               生ペイロードも出力する
+  --raw               生ペイロードも出力する (--log-level=debug と併用)
+  --timestamps        各行の先頭に時刻を付ける
   --wait=SECONDS      配信開始まで待機する秒数
   --duration=SECONDS  指定秒数で自動終了する
   --log-level=LEVEL   debug | info | warn | error
@@ -36,8 +43,15 @@ function explainError(err) {
     SignAPIError: '署名サーバーへのリクエストが失敗しました。ネットワークと SIGN_API_KEY を確認してください。',
     ConnectTimeoutError: '接続がタイムアウトしました。ネットワークを確認して再試行してください。',
     PremiumFeatureError: 'この機能は Euler Stream の有料プランが必要です。',
+    InvalidResponseCompositeError: 'TikTok に到達できていません。npm run doctor でネットワーク (プロキシ / VPN / 地域制限) を確認してください。',
   };
   return hints[name] ?? null;
+}
+
+function fail(logger, message, { showUsage = true } = {}) {
+  (logger?.error ?? console.error)(message);
+  if (showUsage) console.error(`\n${USAGE}`);
+  process.exitCode = 1;
 }
 
 async function main() {
@@ -52,35 +66,44 @@ async function main() {
   try {
     config = buildConfig();
   } catch (err) {
-    console.error(err.message);
-    console.error(`\n${USAGE}`);
-    process.exitCode = 1;
+    fail(null, err.message);
     return;
   }
 
   const logger = createLogger(config.logLevel);
-  const printer = createPrinter({ logger, dumpRaw: config.dumpRaw });
+  const printer = createPrinter({ logger, dumpRaw: config.dumpRaw, timestamps: config.timestamps });
 
-  let source;
-  try {
-    source = config.mock
-      ? createMockSource({ logger })
-      : createTikTokSource({
-          username: config.username,
-          signApiKey: config.signApiKey,
-          waitUntilLiveSeconds: config.waitUntilLiveSeconds,
-          logger,
-        });
-  } catch (err) {
-    logger.error(err.message);
-    console.error(`\n${USAGE}`);
-    process.exitCode = 1;
-    return;
+  // 接続先の解決。短縮 URL のときだけネットワークアクセスが発生する。
+  let username = 'mock';
+  let resolvedFrom = null;
+  if (!config.mock) {
+    try {
+      ({ username, resolvedFrom } = await resolveTarget(config.target, { logger }));
+    } catch (err) {
+      if (err instanceof TargetResolutionError) {
+        fail(logger, err.message, { showUsage: err.showUsage });
+      } else {
+        logger.error(`接続先の解決に失敗しました: ${err.message}`);
+        logger.error(color.yellow('ヒント: 短縮 URL の展開には TikTok への通信が必要です。npm run doctor で到達性を確認してください。'));
+        process.exitCode = 1;
+      }
+      return;
+    }
   }
 
+  const source = config.mock
+    ? createMockSource({ logger })
+    : createTikTokSource({
+        username,
+        signApiKey: config.signApiKey,
+        waitUntilLiveSeconds: config.waitUntilLiveSeconds,
+        logger,
+      });
+
   logger.raw(color.bold('TikTok LIVE Event Server'));
-  logger.raw(color.dim('  ギフト / フォロー / いいね をリアルタイムでコンソールに表示します'));
-  logger.raw(color.dim(`  対象: @${source.username}  モード: ${config.mock ? 'mock' : 'live'}`));
+  logger.raw(color.dim('  ギフト / いいね / フォロー / コメント をリアルタイムでコンソールに表示します'));
+  logger.raw(color.dim(`  対象: @${username}  モード: ${config.mock ? 'mock' : 'live'}`));
+  if (resolvedFrom) logger.raw(color.dim(`  短縮 URL の展開先: ${resolvedFrom}`));
   logger.raw(color.dim(`  署名 API キー: ${config.signApiKey ? '設定あり' : '未設定 (無料枠)'}`));
   logger.raw('');
 
@@ -92,7 +115,13 @@ async function main() {
   });
 
   source.emitter.on('disconnected', () => logger.warn('切断されました'));
-  source.emitter.on('error', (err) => logger.error(err.message));
+
+  // connect() 実行中のエラーは最後に catch 側でまとめて報告するので、ここでは debug に落とす
+  let connectInFlight = false;
+  source.emitter.on('error', (err) => {
+    if (connectInFlight) logger.debug(err.message);
+    else logger.error(err.message);
+  });
 
   let shuttingDown = false;
   const shutdown = async (reason) => {
@@ -118,12 +147,15 @@ async function main() {
   }
 
   try {
+    connectInFlight = true;
     await source.connect();
   } catch (err) {
     logger.error(`接続に失敗しました: ${err.message}`);
     const hint = explainError(err);
     if (hint) logger.error(color.yellow(`ヒント: ${hint}`));
     process.exitCode = 1;
+  } finally {
+    connectInFlight = false;
   }
 }
 

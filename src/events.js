@@ -15,9 +15,6 @@ export const EventType = {
   VIEWER: 'viewer',
 };
 
-/** 検証対象の 3 種類。README の成功条件はこれらが表示されること。 */
-export const PRIMARY_EVENTS = [EventType.GIFT, EventType.FOLLOW, EventType.LIKE];
-
 function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;

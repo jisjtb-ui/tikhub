@@ -31,6 +31,21 @@ const HANDLERS = [
 
 const RECONNECT_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000];
 
+/** ライブラリの error イベントは { info, exception } 形式なので、読める Error に均す。 */
+function toError(payload) {
+  if (payload instanceof Error) return payload;
+  if (payload && typeof payload === 'object') {
+    const { info, exception } = payload;
+    const detail = exception instanceof Error ? exception.message : exception ? String(exception) : '';
+    // info と例外メッセージが同じことがあるので重複は畳む
+    const message = [...new Set([info, detail].filter(Boolean))].join(': ');
+    const error = new Error(message || 'Unknown error');
+    if (exception instanceof Error) error.cause = exception;
+    return error;
+  }
+  return new Error(String(payload));
+}
+
 /**
  * 非公式ライブラリ tiktok-live-connector を使って TikTok LIVE に接続するイベント源。
  *
@@ -71,8 +86,9 @@ export function createTikTokSource({ username, signApiKey, waitUntilLiveSeconds 
     });
   }
 
-  connection.on(ControlEvent.ERROR, (err) => {
-    emitter.emit('error', err instanceof Error ? err : new Error(String(err)));
+  // ライブラリは { info, exception } の形でエラーを流してくる
+  connection.on(ControlEvent.ERROR, (payload) => {
+    emitter.emit('error', toError(payload));
   });
 
   connection.on(WebcastEvent.STREAM_END, () => {

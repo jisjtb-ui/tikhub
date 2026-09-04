@@ -51,7 +51,7 @@ async function main() {
     record('tiktok-live-connector がインストール済み', false, 'npm install を実行してください');
   }
 
-  record('TIKTOK_USERNAME が設定済み', Boolean(config.username), config.username ? `@${config.username}` : '.env か実行時引数で指定してください');
+  record('接続先が指定済み', Boolean(config.target), config.target || '.env の TIKTOK_TARGET か実行時引数で指定してください');
   record('SIGN_API_KEY', true, config.signApiKey ? '設定あり' : '未設定 (無料枠で動作します)');
 
   // 署名サーバーと TikTok の両方に到達できないと接続できない

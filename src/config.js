@@ -27,18 +27,20 @@ function parseIntOr(value, fallback) {
  * コマンドライン引数をパースする。
  *
  *   node src/index.js @username --mock --raw --log-level=debug --wait=300
+ *   node src/index.js https://vt.tiktok.com/XXXXXXXX/
  */
 export function parseArgs(argv = process.argv.slice(2)) {
-  const args = { username: null, mock: false, raw: null, logLevel: null, wait: null, duration: null };
+  const args = { target: null, mock: false, raw: null, logLevel: null, wait: null, duration: null, timestamps: false };
 
   for (const arg of argv) {
     if (arg === '--mock') args.mock = true;
     else if (arg === '--raw') args.raw = true;
+    else if (arg === '--timestamps') args.timestamps = true;
     else if (arg.startsWith('--log-level=')) args.logLevel = arg.slice('--log-level='.length);
     else if (arg.startsWith('--wait=')) args.wait = parseIntOr(arg.slice('--wait='.length), null);
     else if (arg.startsWith('--duration=')) args.duration = parseIntOr(arg.slice('--duration='.length), null);
-    else if (arg.startsWith('--user=')) args.username = arg.slice('--user='.length);
-    else if (!arg.startsWith('-')) args.username = arg;
+    else if (arg.startsWith('--user=')) args.target = arg.slice('--user='.length);
+    else if (!arg.startsWith('-')) args.target = arg;
   }
 
   return args;
@@ -56,15 +58,17 @@ export function buildConfig(argv) {
     throw new Error(`LOG_LEVEL は ${LOG_LEVELS.join(' | ')} のいずれかにしてください (指定値: ${logLevel})`);
   }
 
-  const username = (args.username ?? process.env.TIKTOK_USERNAME ?? '').trim().replace(/^@/, '');
+  // 接続先はユーザー名でも URL でもよい。解決は src/target.js が行う。
+  const target = (args.target ?? process.env.TIKTOK_TARGET ?? process.env.TIKTOK_USERNAME ?? '').trim();
 
   return {
     mock: args.mock,
-    username,
+    target,
     signApiKey: process.env.SIGN_API_KEY?.trim() || undefined,
     waitUntilLiveSeconds: args.wait ?? parseIntOr(process.env.WAIT_UNTIL_LIVE_SECONDS, 0),
     logLevel,
     dumpRaw: args.raw ?? parseBool(process.env.DUMP_RAW, false),
+    timestamps: args.timestamps || parseBool(process.env.TIMESTAMPS, false),
     // 0 より大きいとその秒数で自動終了する (動作確認用)
     durationSeconds: args.duration ?? parseIntOr(process.env.DURATION_SECONDS, 0),
   };

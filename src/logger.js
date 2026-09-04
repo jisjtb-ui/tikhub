@@ -36,8 +36,11 @@ export function createLogger(level = 'info') {
     info: (...args) => emit('info', color.blue('[info ]'), args),
     warn: (...args) => emit('warn', color.yellow('[warn ]'), args),
     error: (...args) => emit('error', color.red('[error]'), args),
-    /** イベント行はラベルを呼び出し側で組み立てる */
-    event: (label, ...args) => emit('info', label, args),
+    /** イベント 1 行。ラベルも整形も呼び出し側が組み立て済み */
+    line: (text) => {
+      if (LEVELS.info < threshold) return;
+      console.log(text);
+    },
     /** 罫線やバナーなど、装飾を付けずにそのまま出す */
     raw: (...args) => console.log(...args),
   };
