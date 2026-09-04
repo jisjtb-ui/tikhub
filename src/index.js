@@ -27,6 +27,7 @@ const USAGE = `
   --mock              モックモード (ネットワーク接続なし)
   --raw               生ペイロードも出力する (--log-level=debug と併用)
   --timestamps        各行の先頭に時刻を付ける
+  --extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
   --wait=SECONDS      配信開始まで待機する秒数
   --duration=SECONDS  指定秒数で自動終了する
   --log-level=LEVEL   debug | info | warn | error
@@ -39,10 +40,10 @@ function explainError(err) {
     UserOfflineError: 'この配信者は現在ライブ配信していません。配信中に実行するか --wait=600 を付けてください。',
     InvalidUniqueIdError: 'ユーザー名が不正です。@ 抜きのユーザー名 (プロフィール URL の @ の後ろ) を指定してください。',
     SignatureRateLimitError: '署名サーバー (Euler Stream) のレート制限に達しました。しばらく待つか、SIGN_API_KEY を設定してください。',
-    SignatureMissingTokensError: '署名サーバーがトークンを返しませんでした。時間をおいて再試行してください。',
+    SignatureMissingTokensError: '署名サーバーがトークンを返しませんでした。Business プランが必要と言われている場合は --extended-gift-info を外してください。',
     SignAPIError: '署名サーバーへのリクエストが失敗しました。ネットワークと SIGN_API_KEY を確認してください。',
     ConnectTimeoutError: '接続がタイムアウトしました。ネットワークを確認して再試行してください。',
-    PremiumFeatureError: 'この機能は Euler Stream の有料プランが必要です。',
+    PremiumFeatureError: 'この機能は Euler Stream の有料プランが必要です。--extended-gift-info を外すと接続できます。',
     InvalidResponseCompositeError: 'TikTok に到達できていません。npm run doctor でネットワーク (プロキシ / VPN / 地域制限) を確認してください。',
   };
   return hints[name] ?? null;
@@ -97,6 +98,7 @@ async function main() {
         username,
         signApiKey: config.signApiKey,
         waitUntilLiveSeconds: config.waitUntilLiveSeconds,
+        extendedGiftInfo: config.extendedGiftInfo,
         logger,
       });
 

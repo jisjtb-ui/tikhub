@@ -19,7 +19,7 @@ TikTok LIVE からリアルタイムイベントを受信し、**コンソール
 ## 必要なもの
 
 - Node.js 20.12 以上 (推奨 22)
-- `tiktok.com` と `tiktok.eulerstream.com` に到達できるネットワーク
+- `tiktok.com` と署名サーバー `api.eulerstream.com` に到達できるネットワーク
 - **配信中の** TikTok LIVE
 
 TikTok のログインもアプリ登録も不要です。
@@ -73,6 +73,7 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 --mock              モックモード (ネットワーク接続なし)
 --raw               生ペイロードも出力する (--log-level=debug と併用)
 --timestamps        各行の先頭に時刻を付ける
+--extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
 --wait=SECONDS      配信開始まで待機する秒数 (例: --wait=600)
 --duration=SECONDS  指定秒数で自動終了する
 --log-level=LEVEL   debug | info | warn | error
@@ -86,6 +87,7 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 | `SIGN_API_KEY` | 署名サーバー [Euler Stream](https://www.eulerstream.com) の API キー。**未設定でも無料枠で動作します** |
 | `SIGN_API_URL` | 署名サーバーのベース URL。未設定なら `https://api.eulerstream.com` |
 | `WAIT_UNTIL_LIVE_SECONDS` | まだ配信中でないとき、開始を待つ秒数 (0 = 待たない) |
+| `EXTENDED_GIFT_INFO` | `true` でギフト一覧も取得する。**Euler Stream の有料プランが必要**。既定は `false` |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 | `TIMESTAMPS` | `true` で各行に時刻を付ける |
 | `DUMP_RAW` | `true` で生ペイロードも出力 |
@@ -159,13 +161,27 @@ TikTok LIVE Event Server
 | エラー時の切り分けメッセージ | ✅ 検証済み |
 | TikTok / 署名サーバーへの到達性 | ✅ 検証済み (`npm run doctor` が全項目 OK) |
 | 短縮 URL の実展開 (`vt.tiktok.com/...` → `@ユーザー名`) | ✅ 検証済み (実ネットワーク) |
-| roomId の取得 | ✅ 検証済み (実ネットワーク) |
-| **配信中の LIVE への接続とイベント受信** | ⚠️ **未検証** |
+| **配信中の LIVE への接続 (roomId 取得 → WebSocket)** | ✅ **検証済み (実配信)** |
+| **`[LIKE]` / `[COMMENT]` / `[GIFT]` の受信** | ✅ **検証済み (実配信)** |
+| `[FOLLOW]` の受信 | ⚠️ 未確認 (検証中に誰もフォローしなかっただけ。実装は `[LIKE]` 等と同じ経路) |
 
-到達性・短縮 URL の展開・roomId の取得までは、ネットワークが通る環境で実際に確認済みです。
-残る「配信中の LIVE に接続してイベントが流れること」は、**検証時に対象が配信中でなかった**
-(TikTok の room info が `status: 4` = 配信終了) ため未確認です。
-配信中に上記の手順を実行して確認してください。
+実際の配信 (視聴者 約 8,000 人) に接続して 120 秒間受信した結果:
+
+```
+===== セッション集計 =====
+接続時間      : 121 秒
+ギフト        : 3 件 / 3 diamonds
+いいね        : 107 回 / 1,501 個
+フォロー      : 0 件 (ユニーク 0 人)
+コメント      : 32 件
+シェア        : 0 件
+入室          : 51 件
+最大視聴者数  : 8,073
+==========================
+```
+
+`[FOLLOW]` だけは、この 120 秒間に誰もフォローしなかったため未確認です。
+イベント購読・正規化・表示の経路は他のイベントと共通なので、フォローが発生すれば同様に表示されます。
 
 ---
 
@@ -201,6 +217,7 @@ docs/
 | `Failed to retrieve Room ID from all sources` | 同上。プロキシ / VPN / 地域制限を確認してください |
 | `署名サーバー (Euler Stream) のレート制限に達しました` | `npm run doctor` で残りリクエスト数を確認できます。しばらく待つか、`.env` に `SIGN_API_KEY` を設定してください |
 | 接続はできるがイベントが出ない | 誰もアクションしていない可能性があります。自分でいいねを押して確認してください。`--log-level=debug --raw` で受信状況を確認できます |
+| `Failed to sign a request: This endpoint requires a Business plan` | ギフト一覧の取得 (`--extended-gift-info` / `EXTENDED_GIFT_INFO=true`) は有料プラン限定です。外してください。既定では無効で、外しても `[GIFT]` のダイヤ数は表示されます |
 | ユーザー名が不正と言われる | プロフィール URL の `@` の後ろの文字列を指定してください (表示名ではありません) |
 
 ---

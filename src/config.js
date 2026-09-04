@@ -30,12 +30,13 @@ function parseIntOr(value, fallback) {
  *   node src/index.js https://vt.tiktok.com/XXXXXXXX/
  */
 export function parseArgs(argv = process.argv.slice(2)) {
-  const args = { target: null, mock: false, raw: null, logLevel: null, wait: null, duration: null, timestamps: false };
+  const args = { target: null, mock: false, raw: null, logLevel: null, wait: null, duration: null, timestamps: false, extendedGiftInfo: false };
 
   for (const arg of argv) {
     if (arg === '--mock') args.mock = true;
     else if (arg === '--raw') args.raw = true;
     else if (arg === '--timestamps') args.timestamps = true;
+    else if (arg === '--extended-gift-info') args.extendedGiftInfo = true;
     else if (arg.startsWith('--log-level=')) args.logLevel = arg.slice('--log-level='.length);
     else if (arg.startsWith('--wait=')) args.wait = parseIntOr(arg.slice('--wait='.length), null);
     else if (arg.startsWith('--duration=')) args.duration = parseIntOr(arg.slice('--duration='.length), null);
@@ -68,6 +69,8 @@ export function buildConfig(argv) {
     // tiktok-live-connector が実際に叩く署名サーバー。既定値はライブラリ側と同じ。
     signApiUrl: process.env.SIGN_API_URL?.trim() || 'https://api.eulerstream.com',
     waitUntilLiveSeconds: args.wait ?? parseIntOr(process.env.WAIT_UNTIL_LIVE_SECONDS, 0),
+    // ギフト一覧の取得は署名 API (Euler Stream の有料プラン限定) を使うため既定では無効
+    extendedGiftInfo: args.extendedGiftInfo || parseBool(process.env.EXTENDED_GIFT_INFO, false),
     logLevel,
     dumpRaw: args.raw ?? parseBool(process.env.DUMP_RAW, false),
     timestamps: args.timestamps || parseBool(process.env.TIMESTAMPS, false),

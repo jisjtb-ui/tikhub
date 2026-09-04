@@ -56,7 +56,17 @@ function toError(payload) {
  *   'end'          (reason)  再接続しない終了
  *   'error'        (Error)
  */
-export function createTikTokSource({ username, signApiKey, waitUntilLiveSeconds = 0, logger }) {
+/**
+ * 接続そのものではなく「ギフト一覧の取得」が失敗しただけかを判定する。
+ * ギフト一覧 (gift/list/) は署名が必要で、その署名 API は Euler Stream の有料プラン限定。
+ */
+function isExtendedGiftInfoFailure(err) {
+  const name = err?.constructor?.name ?? '';
+  if (name !== 'PremiumFeatureError' && name !== 'SignatureMissingTokensError') return false;
+  return /Business plan|permission from the signature provider/i.test(err?.message ?? '');
+}
+
+export function createTikTokSource({ username, signApiKey, waitUntilLiveSeconds = 0, extendedGiftInfo = false, logger }) {
   if (!username) {
     throw new Error('TikTok のユーザー名が指定されていません (.env の TIKTOK_USERNAME か、実行時引数で指定してください)');
   }
@@ -67,8 +77,10 @@ export function createTikTokSource({ username, signApiKey, waitUntilLiveSeconds 
 
   const connection = new TikTokLiveConnection(username, {
     signApiKey,
-    // ギフトのダイヤ数など、追加情報を取得する
-    enableExtendedGiftInfo: true,
+    // ギフト一覧を接続時に取得して GIFT イベントに extendedGiftInfo を付ける。
+    // ただしこの取得は署名が必要で、署名 API は Euler Stream の有料プラン限定なので既定では無効。
+    // ダイヤ数はイベント本体の gift.diamondCount から取れるため、無効でも [GIFT] 行は出る。
+    enableExtendedGiftInfo: extendedGiftInfo,
     // 接続時にルーム情報を取得し、オフラインなら UserOfflineError を投げる
     fetchRoomInfoOnConnect: true,
     // 接続直後にまとめて送られてくる「過去のイベント」は流さない。
@@ -124,7 +136,18 @@ export function createTikTokSource({ username, signApiKey, waitUntilLiveSeconds 
       }
     }
 
-    const state = await connection.connect();
+    let state;
+    try {
+      state = await connection.connect();
+    } catch (err) {
+      // 有料プランが無くて「ギフト一覧の取得」だけが失敗した場合は、それを諦めて接続を続ける。
+      // ここで諦めないと、本来受信できるはずのイベントまで一切見られなくなる。
+      if (!connection.options.enableExtendedGiftInfo || !isExtendedGiftInfoFailure(err)) throw err;
+      logger.warn('ギフト一覧の取得には Euler Stream の有料プランが必要です。取得せずに接続を続けます。');
+      logger.warn('(ギフトのダイヤ数はイベント本体から取得できるため、[GIFT] の表示には影響しません)');
+      connection.options.enableExtendedGiftInfo = false;
+      state = await connection.connect();
+    }
     reconnectAttempt = 0;
     emitter.emit('connected', { roomId: state.roomId });
     return state;
