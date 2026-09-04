@@ -21,17 +21,49 @@ const record = (name, ok, detail) => {
   console.log(`${mark} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-async function checkHttp(name, url) {
+async function fetchWithTimeout(url, ms = 15_000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const res = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+    return await fetch(url, { signal: controller.signal, redirect: 'manual' });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function checkHttp(name, url) {
+  try {
+    const res = await fetchWithTimeout(url);
     // 4xx/5xx は到達できていないのと同じ扱い (社内プロキシや地域ブロックで弾かれている場合がある)
     record(name, res.status < 400, `HTTP ${res.status}`);
   } catch (err) {
     record(name, false, err.cause?.message ?? err.message);
-  } finally {
-    clearTimeout(timer);
+  }
+}
+
+/**
+ * 署名サーバーの到達性チェック。
+ *
+ * ルートパス (`/`) は「そんなルートは無い」という 404 を返すだけで、到達性の判定には使えない。
+ * 無認証で叩ける `/accounts/me/rate_limits` を使うと、到達性と同時に無料枠の残量も分かる。
+ */
+async function checkSignServer(baseUrl) {
+  const name = '署名サーバー (Euler Stream) に到達できる';
+  const url = new URL('/accounts/me/rate_limits', baseUrl).toString();
+  try {
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) {
+      record(name, false, `HTTP ${res.status} (${baseUrl})`);
+      return;
+    }
+    const body = await res.json();
+    const quota = ['minute', 'hour', 'day']
+      .filter((span) => body?.[span])
+      .map((span) => `${span} ${body[span].remaining}/${body[span].max}`)
+      .join(', ');
+    record(name, true, quota ? `HTTP 200 — 残りリクエスト数: ${quota}` : 'HTTP 200');
+  } catch (err) {
+    record(name, false, err.cause?.message ?? err.message);
   }
 }
 
@@ -56,7 +88,7 @@ async function main() {
 
   // 署名サーバーと TikTok の両方に到達できないと接続できない
   await checkHttp('TikTok に到達できる', 'https://www.tiktok.com/');
-  await checkHttp('署名サーバー (Euler Stream) に到達できる', 'https://tiktok.eulerstream.com/');
+  await checkSignServer(config.signApiUrl);
 
   const failed = results.filter((r) => !r.ok);
   console.log('');

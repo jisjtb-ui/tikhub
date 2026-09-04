@@ -84,6 +84,7 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 | --- | --- |
 | `TIKTOK_TARGET` | 接続先 (ユーザー名 / プロフィール URL / 短縮 URL) |
 | `SIGN_API_KEY` | 署名サーバー [Euler Stream](https://www.eulerstream.com) の API キー。**未設定でも無料枠で動作します** |
+| `SIGN_API_URL` | 署名サーバーのベース URL。未設定なら `https://api.eulerstream.com` |
 | `WAIT_UNTIL_LIVE_SECONDS` | まだ配信中でないとき、開始を待つ秒数 (0 = 待たない) |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 | `TIMESTAMPS` | `true` で各行に時刻を付ける |
@@ -154,14 +155,17 @@ TikTok LIVE Event Server
 | 項目 | 状況 |
 | --- | --- |
 | 出力形式・イベント正規化・連打ギフトの重複排除 | ✅ 検証済み (`npm run mock`) |
-| 接続先の解決 (ユーザー名 / URL / 短縮 URL) | ✅ 検証済み (`npm test` — 12 件のテスト) |
+| 接続先の解決 (ユーザー名 / URL / 短縮 URL) — オフライン | ✅ 検証済み (`npm test` — 12 件のテスト) |
 | エラー時の切り分けメッセージ | ✅ 検証済み |
-| **実際の LIVE への接続** | ⚠️ **未検証** |
+| TikTok / 署名サーバーへの到達性 | ✅ 検証済み (`npm run doctor` が全項目 OK) |
+| 短縮 URL の実展開 (`vt.tiktok.com/...` → `@ユーザー名`) | ✅ 検証済み (実ネットワーク) |
+| roomId の取得 | ✅ 検証済み (実ネットワーク) |
+| **配信中の LIVE への接続とイベント受信** | ⚠️ **未検証** |
 
-実接続が未検証なのは、開発に使用した環境が TikTok 系ドメインへの通信を
-組織のポリシーで遮断しているためです (`vt.tiktok.com` / `www.tiktok.com` /
-`webcast.tiktok.com` / `tiktok.eulerstream.com` すべて CONNECT が 403 で拒否)。
-**手元の環境で上記の手順を実行して確認してください。**
+到達性・短縮 URL の展開・roomId の取得までは、ネットワークが通る環境で実際に確認済みです。
+残る「配信中の LIVE に接続してイベントが流れること」は、**検証時に対象が配信中でなかった**
+(TikTok の room info が `status: 4` = 配信終了) ため未確認です。
+配信中に上記の手順を実行して確認してください。
 
 ---
 
@@ -195,7 +199,7 @@ docs/
 | `この配信者は現在ライブ配信していません` | 配信中に実行してください。`--wait=600` で開始を待てます |
 | `短縮 URL を展開できませんでした (HTTP 403)` | TikTok に到達できていません。`npm run doctor` を実行してください |
 | `Failed to retrieve Room ID from all sources` | 同上。プロキシ / VPN / 地域制限を確認してください |
-| `署名サーバー (Euler Stream) のレート制限に達しました` | しばらく待つか、`.env` に `SIGN_API_KEY` を設定してください |
+| `署名サーバー (Euler Stream) のレート制限に達しました` | `npm run doctor` で残りリクエスト数を確認できます。しばらく待つか、`.env` に `SIGN_API_KEY` を設定してください |
 | 接続はできるがイベントが出ない | 誰もアクションしていない可能性があります。自分でいいねを押して確認してください。`--log-level=debug --raw` で受信状況を確認できます |
 | ユーザー名が不正と言われる | プロフィール URL の `@` の後ろの文字列を指定してください (表示名ではありません) |
 

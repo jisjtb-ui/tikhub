@@ -65,6 +65,8 @@ export function buildConfig(argv) {
     mock: args.mock,
     target,
     signApiKey: process.env.SIGN_API_KEY?.trim() || undefined,
+    // tiktok-live-connector が実際に叩く署名サーバー。既定値はライブラリ側と同じ。
+    signApiUrl: process.env.SIGN_API_URL?.trim() || 'https://api.eulerstream.com',
     waitUntilLiveSeconds: args.wait ?? parseIntOr(process.env.WAIT_UNTIL_LIVE_SECONDS, 0),
     logLevel,
     dumpRaw: args.raw ?? parseBool(process.env.DUMP_RAW, false),
