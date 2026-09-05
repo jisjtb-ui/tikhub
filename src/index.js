@@ -6,7 +6,7 @@ import { createLogger, color } from './logger.js';
 import { createPrinter } from './printer.js';
 import { resolveTarget, TargetResolutionError } from './target.js';
 import { createTikTokSource } from './sources/tiktok.js';
-import { createBridge } from './bridge.js';
+import { createBridge, findGameDir } from './bridge.js';
 import { createMockSource } from './sources/mock.js';
 
 const USAGE = `
@@ -31,7 +31,9 @@ const USAGE = `
   --extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
   --wait=SECONDS      配信開始まで待機する秒数
   --duration=SECONDS  指定秒数で自動終了する
-  --serve[=PORT]      ゲーム画面へイベントを中継する (既定 8787)
+  --serve=PORT        中継サーバーのポートを変える (既定 8787)
+  --no-serve          中継サーバーを立てない (コンソール表示だけ)
+  --game=DIR          ゲームのフォルダを指定する (未指定なら自動で探す)
   --log-level=LEVEL   debug | info | warn | error
 `.trim();
 
@@ -111,17 +113,35 @@ async function main() {
   logger.raw(color.dim(`  署名 API キー: ${config.signApiKey ? '設定あり' : '未設定 (無料枠)'}`));
   logger.raw('');
 
-  // --serve を付けたときだけ、ゲーム画面へイベントを中継するサーバーを立てる。
-  // 付けなければポートは開かず、これまでどおりコンソール表示だけで動く。
+  // ゲーム画面への中継サーバー。既定で立ち上がる (--no-serve で無効)。
+  // ゲームのフォルダが見つかれば、ゲーム本体もここから配信する。
+  // そうすると視聴者側の準備は「1 つの URL を開く」だけになる。
   let bridge = null;
   if (config.servePort) {
-    bridge = createBridge({ port: config.servePort, host: config.serveHost, logger });
+    const gameDir = config.gameDir || findGameDir(process.cwd());
+    bridge = createBridge({
+      port: config.servePort,
+      host: config.serveHost,
+      gameDir,
+      logger,
+    });
     try {
       await bridge.start();
-      logger.info(color.green(`ゲーム画面への中継を開始しました: http://${config.serveHost}:${config.servePort}/events`));
-      logger.info(color.dim("  ゲーム側のコンソールで  KVB.tiktok.connect('http://" + config.serveHost + ':' + config.servePort + "/events')"));
+      const base = `http://${config.serveHost}:${config.servePort}`;
+      logger.raw('');
+      if (gameDir) {
+        logger.raw(color.green('  ゲーム画面はこの URL をブラウザで開いてください'));
+        logger.raw(color.bold(`      ${base}/`));
+        logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
+      } else {
+        logger.raw(color.yellow('  ゲームのフォルダが見つかりませんでした。'));
+        logger.raw(color.dim('  ゲーム画面 (index.html) を直接開けば自動で繋がります。'));
+        logger.raw(color.dim(`  tikhub と並べて置くか、--game=フォルダ を付けると ${base}/ から開けます。`));
+      }
+      logger.raw('');
     } catch (err) {
       logger.error(`中継サーバーを開始できませんでした: ${err.message}`);
+      logger.error(color.yellow(`ヒント: ポート ${config.servePort} が使用中かもしれません。--serve=8788 のように変えてください。`));
       bridge = null;
     }
   }
