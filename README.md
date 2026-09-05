@@ -221,6 +221,57 @@ TikTok LIVE Event Server
 
 ---
 
+## 最新版に更新する
+
+**ZIP を落とし直す必要はありません。**
+
+```bash
+npm run update
+```
+
+tikhub とゲームの両方を、その場で最新版に書き換えます。git も不要です。
+
+```
+最新版に更新します
+
+  tikhub  6 ファイルを更新
+      src/bridge.js
+      src/index.js
+      src/live.js
+      …
+  ゲーム   8 ファイルを更新
+      js/config.js
+      js/renderer.js
+      …
+
+更新しました。tikhub を起動し直してください (Ctrl+C → npm start)。
+ゲーム画面はブラウザの再読み込み (F5) で反映されます。
+```
+
+- **あなたが置いたファイルは消しません。** `.env`、`bgm/` の mp3、`node_modules`、
+  自分で作ったファイルはそのまま残ります。上書きするのは配布物のうち
+  中身が変わったファイルだけです。
+- 何度実行しても安全です。変化がなければ「すべて最新です」と出るだけです。
+- ゲームのフォルダは自動で探します。見つからないときは
+  `npm run update -- --game="ゲームのフォルダ"` で指定してください。
+
+### リポジトリが非公開の場合
+
+読み取り用のトークンが要ります。
+
+1. https://github.com/settings/tokens?type=beta を開く
+2. **Generate new token** → 対象のリポジトリを選ぶ
+3. **Repository permissions → Contents** を **Read-only** にする
+4. tikhub のフォルダの `.env` に 1 行足す
+
+```
+GITHUB_TOKEN=github_pat_xxxxxxxx
+```
+
+リポジトリを公開に変えれば、トークンなしで更新できます。
+
+---
+
 ## ゲーム画面と繋ぐ
 
 起動すると**自動でゲーム画面用のサーバーも立ち上がります**。オプションは要りません。
@@ -289,6 +340,8 @@ src/
   sources/
     tiktok.js       tiktok-live-connector を使う本番のイベント源
     mock.js         TikTok に接続しない擬似イベント源
+tools/
+  update.js         その場で最新版に更新する (npm run update)
 test/
   target.test.js    接続先解決のテスト (node --test)
 docs/

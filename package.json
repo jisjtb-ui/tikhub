@@ -11,10 +11,11 @@
     "start": "node src/index.js",
     "mock": "node src/index.js --mock",
     "verify": "node src/index.js --mock --duration=10",
-    "check": "node --check src/index.js && node --check src/config.js && node --check src/logger.js && node --check src/events.js && node --check src/printer.js && node --check src/target.js && node --check src/bridge.js && node --check src/live.js && node --check src/doctor.js && node --check src/resolve.js && node --check src/sources/tiktok.js && node --check src/sources/mock.js",
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/logger.js && node --check src/events.js && node --check src/printer.js && node --check src/target.js && node --check src/bridge.js && node --check src/live.js && node --check src/doctor.js && node --check src/resolve.js && node --check src/sources/tiktok.js && node --check src/sources/mock.js && node --check tools/update.js",
     "doctor": "node src/doctor.js",
     "resolve": "node src/resolve.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "update": "node tools/update.js"
   },
   "repository": {
     "type": "git",
