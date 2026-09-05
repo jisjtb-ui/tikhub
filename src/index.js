@@ -4,14 +4,15 @@ import process from 'node:process';
 import { buildConfig, loadDotEnv } from './config.js';
 import { createLogger, color } from './logger.js';
 import { createPrinter } from './printer.js';
-import { resolveTarget, TargetResolutionError } from './target.js';
-import { createTikTokSource } from './sources/tiktok.js';
 import { createBridge, findGameDir } from './bridge.js';
-import { createMockSource } from './sources/mock.js';
+import { createLiveController } from './live.js';
 
 const USAGE = `
 使い方:
   node src/index.js [接続先] [オプション]
+
+接続先は省略できます。省略するとブラウザの画面で LIVE の URL を
+貼り付けて接続できます (コマンドに URL を書く必要がありません)。
 
 接続先はユーザー名でも URL でもよい:
   @username
@@ -78,66 +79,42 @@ async function main() {
   const logger = createLogger(config.logLevel);
   const printer = createPrinter({ logger, dumpRaw: config.dumpRaw, timestamps: config.timestamps });
 
-  // 接続先の解決。短縮 URL のときだけネットワークアクセスが発生する。
-  let username = 'mock';
-  let resolvedFrom = null;
-  if (!config.mock) {
-    try {
-      ({ username, resolvedFrom } = await resolveTarget(config.target, { logger }));
-    } catch (err) {
-      if (err instanceof TargetResolutionError) {
-        fail(logger, err.message, { showUsage: err.showUsage });
-      } else {
-        logger.error(`接続先の解決に失敗しました: ${err.message}`);
-        logger.error(color.yellow('ヒント: 短縮 URL の展開には TikTok への通信が必要です。npm run doctor で到達性を確認してください。'));
-        process.exitCode = 1;
-      }
-      return;
-    }
-  }
+  let bridge = null;
 
-  const source = config.mock
-    ? createMockSource({ logger })
-    : createTikTokSource({
-        username,
-        signApiKey: config.signApiKey,
-        waitUntilLiveSeconds: config.waitUntilLiveSeconds,
-        extendedGiftInfo: config.extendedGiftInfo,
-        logger,
-      });
+  // 接続先はあとから差し替えられる。起動時に決まっていなくてもよい。
+  const live = createLiveController({
+    config,
+    logger,
+    onEvent: (event, raw) => {
+      printer.handle(event, raw);
+      bridge?.broadcast(event);
+    },
+  });
 
   logger.raw(color.bold('TikTok LIVE Event Server'));
   logger.raw(color.dim('  ギフト / いいね / フォロー / コメント をリアルタイムでコンソールに表示します'));
-  logger.raw(color.dim(`  対象: @${username}  モード: ${config.mock ? 'mock' : 'live'}`));
-  if (resolvedFrom) logger.raw(color.dim(`  短縮 URL の展開先: ${resolvedFrom}`));
   logger.raw(color.dim(`  署名 API キー: ${config.signApiKey ? '設定あり' : '未設定 (無料枠)'}`));
   logger.raw('');
 
   // ゲーム画面への中継サーバー。既定で立ち上がる (--no-serve で無効)。
   // ゲームのフォルダが見つかれば、ゲーム本体もここから配信する。
-  // そうすると視聴者側の準備は「1 つの URL を開く」だけになる。
-  let bridge = null;
+  // そうすると準備は「1 つの URL を開く」だけになる。
   if (config.servePort) {
     const gameDir = config.gameDir || findGameDir(process.cwd());
     bridge = createBridge({
       port: config.servePort,
       host: config.serveHost,
       gameDir,
+      live,
       logger,
     });
     try {
       await bridge.start();
       const base = `http://${config.serveHost}:${config.servePort}`;
-      logger.raw('');
-      if (gameDir) {
-        logger.raw(color.green('  ゲーム画面はこの URL をブラウザで開いてください'));
-        logger.raw(color.bold(`      ${base}/`));
-        logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
-      } else {
-        logger.raw(color.yellow('  ゲームのフォルダが見つかりませんでした。'));
-        logger.raw(color.dim('  ゲーム画面 (index.html) を直接開けば自動で繋がります。'));
-        logger.raw(color.dim(`  tikhub と並べて置くか、--game=フォルダ を付けると ${base}/ から開けます。`));
-      }
+      logger.raw(color.green('  ブラウザでこの URL を開いてください'));
+      logger.raw(color.bold(`      ${base}/`));
+      if (gameDir) logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
+      else logger.raw(color.yellow('      ※ ゲームのフォルダが見つかりません。tikhub と並べて置いてください。'));
       logger.raw('');
     } catch (err) {
       logger.error(`中継サーバーを開始できませんでした: ${err.message}`);
@@ -146,60 +123,35 @@ async function main() {
     }
   }
 
-  source.emitter.on('event', (event, raw) => {
-    printer.handle(event, raw);
-    bridge?.broadcast(event);
-  });
-
-  source.emitter.on('connected', ({ roomId }) => {
-    logger.info(color.green(`接続しました (roomId: ${roomId})`));
-    logger.info(color.dim('イベント待機中… 終了するには Ctrl+C'));
-  });
-
-  source.emitter.on('disconnected', () => logger.warn('切断されました'));
-
-  // connect() 実行中のエラーは最後に catch 側でまとめて報告するので、ここでは debug に落とす
-  let connectInFlight = false;
-  source.emitter.on('error', (err) => {
-    if (connectInFlight) logger.debug(err.message);
-    else logger.error(err.message);
-  });
-
-  let shuttingDown = false;
-  const shutdown = async (reason) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info(`終了します (${reason})`);
-    try {
-      await source.disconnect();
-    } catch {
-      // 切断時のエラーは終了処理を妨げない
-    }
-    await bridge?.close();
-    logger.raw(printer.summary());
-    process.exit(0);
-  };
-
-  source.emitter.on('end', (reason) => void shutdown(reason));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  // 起動時に接続先が分かっていれば繋ぐ。無ければブラウザからの指定を待つ。
+  const initialTarget = config.mock ? '--mock' : config.target;
+  if (initialTarget) {
+    await live.connect(initialTarget);
+  } else if (bridge) {
+    logger.info('接続先の入力を待っています (ブラウザの画面に LIVE の URL を貼り付けてください)');
+  } else {
+    fail(logger, '接続先が指定されていません。');
+    return;
+  }
 
   if (config.durationSeconds > 0) {
     logger.info(`${config.durationSeconds} 秒後に自動終了します`);
     setTimeout(() => void shutdown('duration に達しました'), config.durationSeconds * 1000).unref();
   }
 
-  try {
-    connectInFlight = true;
-    await source.connect();
-  } catch (err) {
-    logger.error(`接続に失敗しました: ${err.message}`);
-    const hint = explainError(err);
-    if (hint) logger.error(color.yellow(`ヒント: ${hint}`));
-    process.exitCode = 1;
-  } finally {
-    connectInFlight = false;
+  let shuttingDown = false;
+  async function shutdown(reason) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`終了します (${reason})`);
+    await live.disconnect();
+    await bridge?.close();
+    logger.raw(printer.summary());
+    process.exit(0);
   }
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 main().catch((err) => {

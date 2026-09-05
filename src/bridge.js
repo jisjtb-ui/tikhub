@@ -88,9 +88,47 @@ code{background:#000;padding:3px 8px;border-radius:5px}a{color:#7cc7ff}</style>
 /**
  * @param {object} options { port, host, gameDir, logger }
  */
-export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, logger }) {
+/** ローカルからのアクセスか。接続先の変更はここからだけ受け付ける。 */
+function isLoopback(req) {
+  const addr = req.socket?.remoteAddress || '';
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+function readJson(req, limit = 4096) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > limit) { req.destroy(); resolve(null); }
+    });
+    req.on('end', () => {
+      try { resolve(JSON.parse(body || '{}')); } catch { resolve(null); }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * @param {object} options
+ *   port, host, gameDir, logger
+ *   live … 接続先を差し替えるための操作口 (createLiveController)。
+ *          渡すとブラウザから URL を貼り付けて接続できるようになる。
+ */
+export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, live = null, logger }) {
   const clients = new Set();
   let keepalive = null;
+
+  function liveState() {
+    return live ? live.getState() : { status: 'unknown' };
+  }
+
+  function push(event, data) {
+    const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of clients) res.write(line);
+  }
+
+  // 接続先が変わったらブラウザへ知らせる (画面の表示を切り替えるため)
+  live?.onChange((state) => push('status', state));
 
   function sendFile(res, filePath) {
     // gameDir の外へ出るリクエストは拒否する
@@ -126,7 +164,54 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
 
     if (reqPath === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, clients: clients.size, game: Boolean(gameDir) }));
+      res.end(JSON.stringify({
+        ok: true,
+        clients: clients.size,
+        game: Boolean(gameDir),
+        control: Boolean(live),
+        live: liveState(),
+      }));
+      return;
+    }
+
+    // ブラウザから接続先を貼り付けて繋ぐ / 切る。
+    // 同じ PC からのアクセスだけを受け付ける (LAN に公開しても操作はされない)。
+    if (reqPath === '/connect' || reqPath === '/disconnect') {
+      if (!live) { res.writeHead(404).end(); return; }
+      if (req.method !== 'POST') { res.writeHead(405).end(); return; }
+      if (!isLoopback(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, message: 'この操作は tikhub を動かしている PC からのみ行えます' }));
+        return;
+      }
+
+      (async () => {
+        if (reqPath === '/disconnect') {
+          await live.disconnect();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, live: liveState() }));
+          return;
+        }
+
+        const body = await readJson(req);
+        const target = body && typeof body.target === 'string' ? body.target.trim() : '';
+        if (!target) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, message: '接続先が空です' }));
+          return;
+        }
+
+        logger?.info(`ブラウザから接続を要求されました: ${target}`);
+        const state = await live.connect(target);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        // 失敗の理由はそのまま返す。画面に「接続できませんでした」としか
+        // 出ないと、配信していないのか URL が違うのか分からなくなる。
+        res.end(JSON.stringify({
+          ok: state.status === 'connected',
+          message: state.message || null,
+          live: state,
+        }));
+      })();
       return;
     }
 
@@ -137,8 +222,8 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       });
-      // 最初の 1 行で接続が確立したことをブラウザ側に知らせる
-      res.write('event: ready\ndata: {}\n\n');
+      // 最初の 1 行で、接続できたことと今の配信の状態を知らせる
+      res.write(`event: ready\ndata: ${JSON.stringify({ control: Boolean(live), live: liveState() })}\n\n`);
 
       clients.add(res);
       logger?.info(`ゲーム画面が接続しました (現在 ${clients.size} 台)`);
