@@ -113,8 +113,17 @@ async function main() {
       const base = `http://${config.serveHost}:${config.servePort}`;
       logger.raw(color.green('  ブラウザでこの URL を開いてください'));
       logger.raw(color.bold(`      ${base}/`));
-      if (gameDir) logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
-      else logger.raw(color.yellow('      ※ ゲームのフォルダが見つかりません。tikhub と並べて置いてください。'));
+      if (gameDir) {
+        logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
+      } else {
+        // 見つからないときは、何を探したかを見せる。「並べたのに出ない」で
+        // 詰まったときに、どこを直せばいいかが分かるようにするため。
+        logger.raw('');
+        logger.raw(color.yellow('  ※ ゲームのフォルダが見つかりませんでした。'));
+        logger.raw(color.dim(`     探した場所: ${process.cwd()} から上へ 3 階層`));
+        logger.raw(color.dim('     ゲームのフォルダには index.html と js/game.js が必要です。'));
+        logger.raw(color.dim('     見つからない場合は  npm start -- --game="ゲームのフォルダ"  で直接指定できます。'));
+      }
       logger.raw('');
     } catch (err) {
       logger.error(`中継サーバーを開始できませんでした: ${err.message}`);

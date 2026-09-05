@@ -34,38 +34,59 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-/** ゲームのフォルダらしいか (index.html があるか)。 */
+/** ゲームのフォルダか。名前ではなく中身で判断する (フォルダ名は自由に変えられるため)。 */
 function looksLikeGame(dir) {
   try {
-    return fs.statSync(path.join(dir, 'index.html')).isFile();
+    return fs.statSync(path.join(dir, 'index.html')).isFile()
+      && fs.statSync(path.join(dir, 'js', 'game.js')).isFile();
   } catch {
     return false;
   }
 }
 
+/** dir の中にあるフォルダを、ゲームらしい名前のものから順に返す。 */
+function childDirs(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const dirs = entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+    .map((e) => path.join(dir, e.name))
+    .slice(0, 300);
+
+  // 名前で当たりを付けるが、外れても中身で判定するので取りこぼさない
+  const likely = (p) => /kawaii|game|vs/i.test(path.basename(p));
+  return [...dirs.filter(likely), ...dirs.filter((p) => !likely(p))];
+}
+
 /**
  * ゲームのフォルダを探す。
  *
- * tikhub と並べて置かれている前提で、親フォルダから名前に kawaii を含む
- * ものを探します。見つからなければ null (中継だけを行う)。
+ * 起動した場所から上へ 3 階層たどり、それぞれの中のフォルダを見ます。
+ * ZIP を解凍すると `tikhub-main\tikhub-main\` のように同じ名前が二重になり、
+ * その内側で起動すると「隣」に見えるはずのゲームが 2 階層上になるためです。
+ *
+ * 判定はフォルダ名ではなく中身 (index.html と js/game.js があるか) で行うので、
+ * フォルダの名前を変えていても見つかります。
+ *
+ * @returns {string|null} 見つからなければ null (中継だけを行う)
  */
 export function findGameDir(startDir = process.cwd()) {
-  const parent = path.resolve(startDir, '..');
-  const candidates = [path.join(startDir, 'game'), path.join(parent, 'game')];
+  let dir = path.resolve(startDir);
 
-  try {
-    for (const name of fs.readdirSync(parent)) {
-      if (/kawaii/i.test(name)) candidates.push(path.join(parent, name));
+  for (let level = 0; level < 4; level += 1) {
+    for (const candidate of childDirs(dir)) {
+      if (looksLikeGame(candidate)) return candidate;
+      // ZIP の二重フォルダ (foo/foo/) にも 1 階層だけ潜る
+      const nested = path.join(candidate, path.basename(candidate));
+      if (looksLikeGame(nested)) return nested;
     }
-  } catch {
-    // 親フォルダが読めなくても探索を続ける
-  }
-
-  for (const dir of candidates) {
-    if (looksLikeGame(dir)) return dir;
-    // ZIP を解凍すると同じ名前が二重になることがある
-    const nested = path.join(dir, path.basename(dir));
-    if (looksLikeGame(nested)) return nested;
+    const up = path.dirname(dir);
+    if (up === dir) break;              // ドライブの一番上まで来た
+    dir = up;
   }
   return null;
 }
@@ -76,10 +97,12 @@ function statusPage(port) {
 code{background:#000;padding:3px 8px;border-radius:5px}a{color:#7cc7ff}</style>
 <h1>TikTok LIVE Event Server</h1>
 <p>イベントの中継は動いています。ただし<b>ゲームのフォルダが見つかりませんでした</b>。</p>
-<p>ゲーム画面を開いたうえで、次のどちらかをしてください。</p>
+<p>ゲームのフォルダとは <code>index.html</code> と <code>js/game.js</code> が入っているフォルダです。
+次のどちらかをしてください。</p>
 <ul>
-  <li>ゲームのフォルダを tikhub と<b>同じ場所に並べて</b>置き、tikhub を起動し直す</li>
-  <li>または起動時に <code>--game=ゲームのフォルダ</code> を付ける</li>
+  <li>tikhub と<b>同じ場所に並べて</b>置き、tikhub を起動し直す</li>
+  <li>起動時に <code>npm start -- --game="ゲームのフォルダ"</code> で直接指定する</li>
+  <li>あるいはゲームの <code>index.html</code> を直接開く（自動でここに繋ぎにきます）</li>
 </ul>
 <p>ゲーム画面を直接開いた場合は、自動で <code>http://127.0.0.1:${port}/events</code> に繋ぎにいきます。</p>
 <p><a href="/health">/health</a> で状態を確認できます。</p>`;
