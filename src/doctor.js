@@ -83,7 +83,9 @@ async function main() {
     record('tiktok-live-connector がインストール済み', false, 'npm install を実行してください');
   }
 
-  record('接続先が指定済み', Boolean(config.target), config.target || '.env の TIKTOK_TARGET か実行時引数で指定してください');
+  // 接続先はブラウザの画面から指定できるので、未指定でも問題ではない。
+  // ここを失敗にすると、正常な状態で「1 件の問題があります」と出てしまう。
+  record('接続先', true, config.target || '未指定 (起動後にブラウザの画面で指定できます)');
   record('SIGN_API_KEY', true, config.signApiKey ? '設定あり' : '未設定 (無料枠で動作します)');
 
   // 署名サーバーと TikTok の両方に到達できないと接続できない

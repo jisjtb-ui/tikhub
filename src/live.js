@@ -34,6 +34,9 @@ export function createLiveController({ config, logger, onEvent }) {
   let source = null;
   let state = { status: 'idle', target: null, username: null, roomId: null, message: null };
   const listeners = [];
+  // 接続要求が重なっても順番に処理する。並行して走ると、切ったつもりの
+  // 前の配信が繋がったまま残ることがある。
+  let queue = Promise.resolve();
 
   function setState(patch) {
     state = { ...state, ...patch };
@@ -63,7 +66,12 @@ export function createLiveController({ config, logger, onEvent }) {
    * @param {string} target ユーザー名 / プロフィール URL / 短縮 URL / '--mock'
    * @returns {Promise<object>} 結果の state
    */
-  async function connect(target) {
+  function connect(target) {
+    queue = queue.then(() => connectNow(target), () => connectNow(target));
+    return queue;
+  }
+
+  async function connectNow(target) {
     await disconnect();
 
     const wanted = String(target ?? '').trim();
@@ -109,8 +117,10 @@ export function createLiveController({ config, logger, onEvent }) {
 
     try {
       const result = await next.connect();
-      logger.info(`接続しました (roomId: ${result.roomId})`);
-      if (resolvedFrom) logger.debug(`短縮 URL の展開先: ${resolvedFrom}`);
+      // 「今どこに繋がっているのか」はコンソールで一番知りたい情報なので、
+      // roomId だけでなく接続先の名前も必ず出す。
+      logger.info(`接続しました: @${username}  (${mock ? 'モック' : 'ライブ'} / roomId: ${result.roomId})`);
+      if (resolvedFrom) logger.info(`  短縮 URL の展開先: ${resolvedFrom}`);
       setState({
         status: 'connected',
         username,
