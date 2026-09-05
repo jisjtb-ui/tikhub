@@ -68,23 +68,43 @@ function extract(archivePath, intoDir, kind) {
   ], { stdio: 'pipe' });
 }
 
-async function download(repo, token, kind) {
-  const url = `https://api.github.com/repos/${OWNER}/${repo}/${kind === 'tar' ? 'tarball' : 'zipball'}/main`;
-  const headers = { 'User-Agent': 'tikhub-update', Accept: 'application/vnd.github+json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
+const UA = { 'User-Agent': 'tikhub-update' };
 
-  const res = await fetch(url, { headers, redirect: 'follow' });
+/**
+ * 最新のアーカイブを落とす。
+ *
+ * まず**認証なし**で公開用の URL を叩きます。公開リポジトリならこれで取れますし、
+ * .env に古いトークンが残っていても巻き込まれません
+ * (無効なトークンを付けると、公開リポジトリでも 401 で弾かれます)。
+ *
+ * これが 404 になるのは非公開のときなので、そのときだけトークンを付けて
+ * API から取り直します。
+ */
+async function download(repo, token, kind) {
+  const ext = kind === 'tar' ? 'tar.gz' : 'zip';
+  const publicUrl = `https://github.com/${OWNER}/${repo}/archive/refs/heads/main.${ext}`;
+
+  let res = await fetch(publicUrl, { headers: UA, redirect: 'follow' });
+
+  if (!res.ok && token) {
+    const apiUrl = `https://api.github.com/repos/${OWNER}/${repo}/${kind === 'tar' ? 'tarball' : 'zipball'}/main`;
+    res = await fetch(apiUrl, {
+      headers: { ...UA, Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` },
+      redirect: 'follow',
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`${repo}: トークンが受け付けられませんでした。.env の GITHUB_TOKEN を確認するか、行ごと消してください。`);
+    }
+  }
+
   if (res.status === 404) {
     throw new Error(token
-      ? `${repo} が見つかりません。トークンにこのリポジトリの権限があるか確認してください。`
-      : `${repo} は非公開のようです。GITHUB_TOKEN が必要です。`);
+      ? `${repo} を取得できません。トークンにこのリポジトリの権限があるか確認してください。`
+      : `${repo} が非公開のようです。GITHUB_TOKEN が必要です。`);
   }
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('認証に失敗しました。GITHUB_TOKEN を確認してください。');
-  }
-  if (!res.ok) throw new Error(`ダウンロードに失敗しました (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`${repo}: ダウンロードに失敗しました (HTTP ${res.status})`);
 
-  const file = path.join(os.tmpdir(), `${repo}-${Date.now()}.${kind === 'tar' ? 'tar.gz' : 'zip'}`);
+  const file = path.join(os.tmpdir(), `${repo}-${Date.now()}.${ext}`);
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
   return file;
 }
@@ -164,7 +184,7 @@ async function main() {
   const gameDir = arg ? arg.slice('--game='.length) : findGameDir(here);
 
   const kind = hasTar() ? 'tar' : 'zip';
-  console.log(`最新版に更新します${token ? ' (トークンあり)' : ''}\n`);
+  console.log('最新版に更新します\n');
 
   let changed = 0;
   try {
