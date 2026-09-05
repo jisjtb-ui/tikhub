@@ -37,6 +37,9 @@ export function createLiveController({ config, logger, onEvent }) {
   // 接続要求が重なっても順番に処理する。並行して走ると、切ったつもりの
   // 前の配信が繋がったまま残ることがある。
   let queue = Promise.resolve();
+  // 配信開始を待っている間の再試行タイマー
+  let waitTimer = null;
+  const RETRY_MS = 15_000;
 
   function setState(patch) {
     state = { ...state, ...patch };
@@ -47,16 +50,40 @@ export function createLiveController({ config, logger, onEvent }) {
     return { ...state };
   }
 
-  /** 現在の接続を切る。接続していなければ何もしない。 */
+  function cancelWait() {
+    if (waitTimer) clearTimeout(waitTimer);
+    waitTimer = null;
+  }
+
+  /** まだ配信していない、という失敗かどうか。 */
+  function isOffline(err) {
+    return err?.constructor?.name === 'UserOfflineError'
+      || /isn't online|not online|オフライン/i.test(err?.message ?? '');
+  }
+
+  /**
+   * 現在の接続を切る。配信の開始待ちも取り消す。
+   *
+   * 待機中は接続オブジェクトを持っていないので、「繋いでいないから何もしない」
+   * で抜けてしまうと status が 'waiting' のまま残り、画面が待機表示から
+   * 戻らなくなる。状態を戻すところまでが切断の仕事。
+   */
   async function disconnect() {
-    if (!source) return;
-    const previous = source;
-    source = null;
-    try {
-      await previous.disconnect();
-    } catch {
-      // 切断時のエラーは次の接続を妨げない
+    const wasWaiting = Boolean(waitTimer) || state.status === 'waiting';
+    cancelWait();
+
+    if (source) {
+      const previous = source;
+      source = null;
+      try {
+        await previous.disconnect();
+      } catch {
+        // 切断時のエラーは次の接続を妨げない
+      }
+    } else if (!wasWaiting && state.status === 'idle') {
+      return;                       // もともと何もしていない
     }
+
     setState({ status: 'idle', username: null, roomId: null, message: null });
   }
 
@@ -128,9 +155,25 @@ export function createLiveController({ config, logger, onEvent }) {
         message: null,
       });
     } catch (err) {
+      source = null;
+
+      // まだ配信が始まっていないだけなら、失敗にせず開始を待つ。
+      // 配信を始める前に URL を入れておく、という使い方ができるようにするため。
+      if (isOffline(err)) {
+        logger.info(`@${username} はまだ配信していません。開始を待ちます (${RETRY_MS / 1000} 秒ごとに確認)`);
+        setState({
+          status: 'waiting',
+          username,
+          message: `@${username} の配信開始を待っています…`,
+        });
+        cancelWait();
+        waitTimer = setTimeout(() => { void connect(target); }, RETRY_MS);
+        waitTimer.unref?.();
+        return getState();
+      }
+
       const message = explainError(err);
       logger.error(`接続に失敗しました: ${message}`);
-      source = null;
       setState({ status: 'error', username, message });
     }
     return getState();

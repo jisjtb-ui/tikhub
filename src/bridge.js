@@ -185,6 +185,12 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
 
     const reqPath = decodeURIComponent((req.url || '/').split('?')[0]);
 
+    // ブラウザが必ず取りに来る。無いと毎回 404 がコンソールに出て紛らわしい。
+    if (reqPath === '/favicon.ico') {
+      res.writeHead(204).end();
+      return;
+    }
+
     if (reqPath === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -229,8 +235,10 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         // 失敗の理由はそのまま返す。画面に「接続できませんでした」としか
         // 出ないと、配信していないのか URL が違うのか分からなくなる。
+        // 「待機中」も受け付けた扱いにする。まだ配信していないだけで、
+        // 始まれば自動で繋がるため、利用者から見れば失敗ではない。
         res.end(JSON.stringify({
-          ok: state.status === 'connected',
+          ok: state.status === 'connected' || state.status === 'waiting',
           message: state.message || null,
           live: state,
         }));
