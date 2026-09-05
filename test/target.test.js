@@ -23,7 +23,7 @@ test('解釈できない入力は null', () => {
 });
 
 test('短縮 URL を判別する', () => {
-  assert.equal(isShortLink('https://vt.tiktok.com/ZS9BwoUtNh7vE-dtaKy/'), true);
+  assert.equal(isShortLink('https://vt.tiktok.com/EXAMPLE12345/'), true);
   assert.equal(isShortLink('https://vm.tiktok.com/ABCDEFG/'), true);
   assert.equal(isShortLink('https://www.tiktok.com/t/ABCDEFG/'), true);
   assert.equal(isShortLink('https://www.tiktok.com/@kawaii_fan/live'), false);
@@ -39,9 +39,9 @@ function stubFetch(redirects) {
 
 test('短縮 URL のリダイレクトを辿ってユーザー名を解決する', async () => {
   const fetchImpl = stubFetch({
-    'https://vt.tiktok.com/ZS9BwoUtNh7vE-dtaKy/': 'https://www.tiktok.com/@kawaii_fan/live?is_from_webapp=1',
+    'https://vt.tiktok.com/EXAMPLE12345/': 'https://www.tiktok.com/@kawaii_fan/live?is_from_webapp=1',
   });
-  const result = await resolveTarget('https://vt.tiktok.com/ZS9BwoUtNh7vE-dtaKy/', { fetchImpl });
+  const result = await resolveTarget('https://vt.tiktok.com/EXAMPLE12345/', { fetchImpl });
   assert.equal(result.username, 'kawaii_fan');
   assert.equal(result.resolvedFrom, 'https://www.tiktok.com/@kawaii_fan/live?is_from_webapp=1');
 });
