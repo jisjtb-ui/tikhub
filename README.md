@@ -76,7 +76,9 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 --extended-gift-info  ギフト一覧も取得する (Euler Stream の有料プランが必要)
 --wait=SECONDS      配信開始まで待機する秒数 (例: --wait=600)
 --duration=SECONDS  指定秒数で自動終了する
---serve[=PORT]      受信したイベントをゲーム画面へ中継する (既定 8787)
+--serve=PORT        中継サーバーのポートを変える (既定 8787)
+--no-serve          中継サーバーを立てない (コンソール表示だけ)
+--game=DIR          ゲームのフォルダを指定する (未指定なら自動で探す)
 --log-level=LEVEL   debug | info | warn | error
 ```
 
@@ -88,7 +90,8 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/
 | `SIGN_API_KEY` | 署名サーバー [Euler Stream](https://www.eulerstream.com) の API キー。**未設定でも無料枠で動作します** |
 | `SIGN_API_URL` | 署名サーバーのベース URL。未設定なら `https://api.eulerstream.com` |
 | `WAIT_UNTIL_LIVE_SECONDS` | まだ配信中でないとき、開始を待つ秒数 (0 = 待たない) |
-| `BRIDGE_PORT` | 中継サーバーのポート (`--serve` と同じ。未設定なら中継しない) |
+| `BRIDGE_PORT` | 中継サーバーのポート (既定 8787。`0` で無効) |
+| `GAME_DIR` | ゲームのフォルダ (未設定なら自動で探す) |
 | `BRIDGE_HOST` | 中継サーバーの待ち受けアドレス。既定 `127.0.0.1` |
 | `EXTENDED_GIFT_INFO` | `true` でギフト一覧も取得する。**Euler Stream の有料プランが必要**。既定は `false` |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
@@ -194,35 +197,52 @@ TikTok LIVE Event Server
 
 ---
 
-## ゲーム画面への中継
+## ゲーム画面と繋ぐ
 
-`--serve` を付けると、受信したイベントをブラウザへ流す小さなサーバーが立ちます。
-KAWAII vs BEAUTIFUL のゲーム画面はここにつなぎます。
+起動すると**自動でゲーム画面用のサーバーも立ち上がります**。オプションは要りません。
 
 ```bash
-npm start -- <LIVE の URL> --serve
-#  → ゲーム画面への中継を開始しました: http://127.0.0.1:8787/events
+npm start -- https://vt.tiktok.com/XXXXXXXX/
 ```
 
-ゲーム画面 (ブラウザ) のコンソールで:
-
-```js
-KVB.tiktok.connect('http://127.0.0.1:8787/events');
+```
+  ゲーム画面はこの URL をブラウザで開いてください
+      http://127.0.0.1:8787/
+      (ゲーム: D:\...\kawaiivsbeautiful)
 ```
 
-- **`--serve` を付けなければポートは開きません。** これまでどおりコンソール表示だけで動きます。
-- WebSocket ではなく **SSE (Server-Sent Events)** です。サーバー → ブラウザの一方向だけで
-  足りるため、追加の依存パッケージなしで動き、切断時の再接続はブラウザ側が自前で行います。
+**ブラウザでその URL を開くだけで終わりです。** コンソールにコマンドを打つ必要はありません。
+
+### ゲームのフォルダの置き方
+
+tikhub と**並べて**置いてください。名前に `kawaii` が含まれていれば自動で見つけます。
+
+```
+D:\Downloads\
+  ├── tikhub-.../              ← ここで npm start
+  └── kawaiivsbeautiful-.../   ← 自動で見つかる
+```
+
+見つからないときは起動時のメッセージがそう伝えます。`--game=フォルダ` で直接指定もできます。
+指定しなくても、`index.html` を直接開けば自動で `127.0.0.1:8787` に繋ぎにいきます。
+
+### 仕組みと補足
+
+- 中継は **SSE (Server-Sent Events)** です。サーバー → ブラウザの一方向で足りるため、
+  追加の依存パッケージなしで動き、切断時の再接続はブラウザ側が自前で行います。
+  **tikhub をあとから起動しても、ゲーム画面は放っておけば繋がります。**
 - 流すのは `printer` が表示するのと同じ正規化済みイベントです。
   連打ギフトは**確定した 1 件だけ**を送るので、ゲーム側で二重に加算されません。
 - 既定では `127.0.0.1` にだけ待ち受けます。別端末から見たい場合は
   `BRIDGE_HOST=0.0.0.0` を指定してください (同一 LAN に公開されます)。
+- ポートが埋まっていたら `--serve=8788` のように変えられます。
+  中継自体が不要なら `--no-serve` で止められます。
 
 疎通確認:
 
 ```bash
-curl http://127.0.0.1:8787/health        # {"ok":true,"clients":1}
-curl -N http://127.0.0.1:8787/events     # イベントが流れてくる
+curl http://127.0.0.1:8787/health
+# {"ok":true,"clients":1,"game":true}
 ```
 
 ---
@@ -237,7 +257,7 @@ src/
   logger.js         ログ出力
   events.js         受信ペイロードを共通の形へ正規化する
   printer.js        1 行 1 イベントの整形表示とセッション集計
-  bridge.js         ゲーム画面へイベントを中継する SSE サーバー (--serve のときだけ)
+  bridge.js         イベントの中継 + ゲーム本体の配信
   doctor.js         環境チェック
   resolve.js        接続先の解決のみを実行する
   sources/
