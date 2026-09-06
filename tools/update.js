@@ -28,6 +28,26 @@ const REPOS = [
   { label: 'ゲーム ', repo: 'kawaiivsbeautiful' },
 ];
 
+/** tikhub から配信できるゲーム。フォルダの中身を見てどれかを判断する。 */
+const GAME_REPOS = ['kawaiivsbeautiful', 'circlebattle'];
+
+/**
+ * このフォルダに入っているのはどのゲームか。
+ *
+ * package.json の name で見ます。フォルダ名は自由に変えられるうえ、
+ * 取り違えると別のゲームのファイルで上書きしてしまうためです。
+ * 判断できなければ既定 (kawaiivsbeautiful) を返します。
+ */
+function gameRepoFor(dir) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    if (GAME_REPOS.includes(pkg.name)) return pkg.name;
+  } catch {
+    /* 読めなければ既定へ */
+  }
+  return REPOS[1].repo;
+}
+
 /** 上書き対象から外すもの。利用者が置いたファイルを消さないため。 */
 const KEEP = new Set(['.env', 'node_modules', '.git', 'bgm']);
 
@@ -190,7 +210,7 @@ async function main() {
   try {
     changed += await updateOne(REPOS[0].label, REPOS[0].repo, here, token, kind);
     if (gameDir) {
-      changed += await updateOne(REPOS[1].label, REPOS[1].repo, gameDir, token, kind);
+      changed += await updateOne(REPOS[1].label, gameRepoFor(gameDir), gameDir, token, kind);
     } else {
       console.log('  ゲーム   フォルダが見つからないので飛ばしました');
       console.log('      npm run update -- --game="ゲームのフォルダ" で指定できます');

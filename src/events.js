@@ -21,16 +21,41 @@ function toNumber(value, fallback = 0) {
 }
 
 /**
+ * プロフィール画像の URL を 1 つ選ぶ。
+ *
+ * protobuf の User は avatarThumb / avatarMedium / avatarLarge を持ち、
+ * それぞれ複数サイズの URL が並んだ urlList を持つ。ゲーム側は円の中に
+ * 小さく描くだけなので、100x100 の webp があればそれを優先する。
+ * 取れなければ null。表示側が既定のアイコンに切り替える。
+ */
+export function pickProfileImage(user) {
+  if (!user) return null;
+  // すでに簡易化された User (ライブラリの legacy 経路) はこの 1 行で済む
+  if (typeof user.profilePictureUrl === 'string' && user.profilePictureUrl) return user.profilePictureUrl;
+
+  for (const image of [user.avatarThumb, user.avatarMedium, user.avatarLarge]) {
+    const urls = image?.urlList;
+    if (!Array.isArray(urls) || urls.length === 0) continue;
+    return urls.find((url) => url.includes('100x100') && url.endsWith('.webp'))
+      ?? urls.find((url) => url.includes('100x100'))
+      ?? urls[0];
+  }
+  return null;
+}
+
+/**
  * ライブラリが返す User は protobuf 由来なので、
  * バージョン差を吸収して最低限のフィールドだけ取り出す。
  */
 export function normalizeUser(user) {
-  if (!user) return { id: null, uniqueId: 'unknown', nickname: 'unknown' };
+  if (!user) return { id: null, uniqueId: 'unknown', nickname: 'unknown', profileImageUrl: null };
   const uniqueId = user.uniqueId ?? user.displayId ?? null;
   return {
     id: user.id ? String(user.id) : null,
     uniqueId: uniqueId ?? 'unknown',
     nickname: user.nickname ?? uniqueId ?? 'unknown',
+    // ゲーム側で視聴者の円の中に表示する。取れないことも多いので null を許す。
+    profileImageUrl: pickProfileImage(user),
   };
 }
 

@@ -303,7 +303,7 @@ npm start -- https://vt.tiktok.com/XXXXXXXX/  # 最初から接続先を指定
 
 ### ゲームのフォルダの置き方
 
-tikhub と**並べて**置いてください。名前に `kawaii` が含まれていれば自動で見つけます。
+tikhub と**並べて**置いてください。`index.html` と `js/game.js` が入っていれば見つけます。
 
 ```
 D:\Downloads\
@@ -312,6 +312,17 @@ D:\Downloads\
 ```
 
 見つからないときは起動時のメッセージがそう伝えます。`--game=フォルダ` で直接指定もできます。
+
+**ゲームを複数置いている場合**は、どれを配信するか指定してください
+(自動で探すと先に見つかったほうになります)。
+
+```
+npm start -- --game="../circlebattle"        # CIRCLE BATTLE を配信する
+npm start -- --game="../kawaiivsbeautiful"   # KAWAII vs BEAUTIFUL を配信する
+```
+
+`npm run update` も同じ `--game=` を見ます。指定したフォルダの `package.json` から
+どちらのゲームかを判断して更新するので、取り違えて別のゲームで上書きすることはありません。
 指定しなくても、`index.html` を直接開けば自動で `127.0.0.1:8787` に繋ぎにいきます。
 
 ### 仕組みと補足
