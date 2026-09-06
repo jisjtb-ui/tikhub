@@ -239,7 +239,8 @@ tikhub とゲームの両方を、その場で最新版に書き換えます。g
       src/index.js
       src/live.js
       …
-  ゲーム   8 ファイルを更新
+  kawaiivsbeautiful  最新でした
+  circlebattle       8 ファイルを更新
       js/config.js
       js/renderer.js
       …
@@ -252,7 +253,11 @@ tikhub とゲームの両方を、その場で最新版に書き換えます。g
   自分で作ったファイルはそのまま残ります。上書きするのは配布物のうち
   中身が変わったファイルだけです。
 - 何度実行しても安全です。変化がなければ「すべて最新です」と出るだけです。
-- ゲームのフォルダは自動で探します。見つからないときは
+- ゲームのフォルダは自動で探します。**複数あれば全部更新します**ので、
+  片方だけ古いまま取り残されることはありません。どのゲームのフォルダかは
+  中身 (`package.json` の name) で判断するので、別のゲームのファイルで
+  上書きすることもありません。
+- 見つからないときや 1 つだけ更新したいときは
   `npm run update -- --game="ゲームのフォルダ"` で指定してください。
 
 ### リポジトリが非公開の場合
@@ -308,21 +313,33 @@ tikhub と**並べて**置いてください。`index.html` と `js/game.js` が
 ```
 D:\Downloads\
   ├── tikhub-.../              ← ここで npm start
-  └── kawaiivsbeautiful-.../   ← 自動で見つかる
+  ├── kawaiivsbeautiful-.../   ← 自動で見つかる
+  └── circlebattle-.../        ← これも自動で見つかる
 ```
 
 見つからないときは起動時のメッセージがそう伝えます。`--game=フォルダ` で直接指定もできます。
 
-**ゲームを複数置いている場合**は、どれを配信するか指定してください
-(自動で探すと先に見つかったほうになります)。
+### ゲームを複数置いている場合
+
+**見つかったものを全部配信します。** 起動時に、それぞれの URL が出ます。
 
 ```
-npm start -- --game="../circlebattle"        # CIRCLE BATTLE を配信する
-npm start -- --game="../kawaiivsbeautiful"   # KAWAII vs BEAUTIFUL を配信する
+  ゲームが 2 つ見つかりました。使うほうの URL を開いてください
+      http://127.0.0.1:8787/kawaiivsbeautiful/   KAWAII vs BEAUTIFUL
+          D:\Downloads\kawaiivsbeautiful
+      http://127.0.0.1:8787/circlebattle/        CIRCLE BATTLE
+          D:\Downloads\circlebattle
 ```
 
-`npm run update` も同じ `--game=` を見ます。指定したフォルダの `package.json` から
-どちらのゲームかを判断して更新するので、取り違えて別のゲームで上書きすることはありません。
+`http://127.0.0.1:8787/` を開くと選択画面が出るので、そこから選ぶこともできます。
+1 つに固定したいときは `npm start -- --game="フォルダ"`。
+
+- URL の名前は各ゲームの `package.json` の name です。フォルダ名を変えても URL は変わりません。
+- **イベントの中継 (`/events`) は 1 本だけ**で、どちらのゲームからでも同じものを受け取ります。
+  2 つ同時に開いて見比べることもできます。
+- `npm run update` も**見つかったゲームを全部**更新します。どのゲームのフォルダかは
+  中身 (`package.json` の name) で判断するので、別のゲームのファイルで上書きすることはありません。
+  1 つだけ更新したいときは `npm run update -- --game="フォルダ"`。
 指定しなくても、`index.html` を直接開けば自動で `127.0.0.1:8787` に繋ぎにいきます。
 
 ### 仕組みと補足

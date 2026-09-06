@@ -4,7 +4,7 @@ import process from 'node:process';
 import { buildConfig, loadDotEnv } from './config.js';
 import { createLogger, color } from './logger.js';
 import { createPrinter } from './printer.js';
-import { createBridge, findGameDir } from './bridge.js';
+import { createBridge, findGameDirs, toGameList } from './bridge.js';
 import { createLiveController } from './live.js';
 
 const USAGE = `
@@ -100,21 +100,32 @@ async function main() {
   // ゲームのフォルダが見つかれば、ゲーム本体もここから配信する。
   // そうすると準備は「1 つの URL を開く」だけになる。
   if (config.servePort) {
-    const gameDir = config.gameDir || findGameDir(process.cwd());
+    // --game= があればそれだけ。無ければ近くにあるゲームを全部配信して、
+    // どれを開くかはブラウザで選んでもらう。
+    const games = toGameList(config.gameDir ? [config.gameDir] : findGameDirs(process.cwd()));
     bridge = createBridge({
       port: config.servePort,
       host: config.serveHost,
-      gameDir,
+      games,
       live,
       logger,
     });
     try {
       await bridge.start();
       const base = `http://${config.serveHost}:${config.servePort}`;
-      logger.raw(color.green('  ブラウザでこの URL を開いてください'));
-      logger.raw(color.bold(`      ${base}/`));
-      if (gameDir) {
-        logger.raw(color.dim(`      (ゲーム: ${gameDir})`));
+      if (games.length === 1) {
+        logger.raw(color.green('  ブラウザでこの URL を開いてください'));
+        logger.raw(color.bold(`      ${base}/`));
+        logger.raw(color.dim(`      (ゲーム: ${games[0].title} - ${games[0].dir})`));
+      } else if (games.length > 1) {
+        logger.raw(color.green(`  ゲームが ${games.length} つ見つかりました。使うほうの URL を開いてください`));
+        for (const game of games) {
+          logger.raw(color.bold(`      ${base}/${game.id}/`) + color.dim(`   ${game.title}`));
+          logger.raw(color.dim(`          ${game.dir}`));
+        }
+        logger.raw('');
+        logger.raw(color.dim(`  迷ったら ${base}/ を開けば選択画面が出ます。`));
+        logger.raw(color.dim('  1 つに固定するなら  npm start -- --game="ゲームのフォルダ"'));
       } else {
         // 見つからないときは、何を探したかを見せる。「並べたのに出ない」で
         // 詰まったときに、どこを直せばいいかが分かるようにするため。

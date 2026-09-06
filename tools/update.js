@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 
-import { findGameDir } from '../src/bridge.js';
+import { findGameDirs } from '../src/bridge.js';
 
 const OWNER = 'jisjtb-ui';
 const REPOS = [
@@ -200,8 +200,10 @@ async function main() {
     return;
   }
 
+  // --game= があればそれだけ。無ければ近くにあるゲームを全部更新する。
+  // 1 つしか更新しないと、2 つ目のゲームだけ古いまま取り残されるため。
   const arg = process.argv.find((a) => a.startsWith('--game='));
-  const gameDir = arg ? arg.slice('--game='.length) : findGameDir(here);
+  const gameDirs = arg ? [arg.slice('--game='.length)] : findGameDirs(here);
 
   const kind = hasTar() ? 'tar' : 'zip';
   console.log('最新版に更新します\n');
@@ -209,8 +211,15 @@ async function main() {
   let changed = 0;
   try {
     changed += await updateOne(REPOS[0].label, REPOS[0].repo, here, token, kind);
-    if (gameDir) {
-      changed += await updateOne(REPOS[1].label, gameRepoFor(gameDir), gameDir, token, kind);
+    if (gameDirs.length) {
+      for (const gameDir of gameDirs) {
+        // どのゲームのフォルダかは中身で判断する。取り違えると
+        // 別のゲームのファイルで上書きしてしまうため。
+        const repo = gameRepoFor(gameDir);
+        // 複数あるときは、どのゲームを更新しているのか分かるように名前を出す
+        const label = gameDirs.length > 1 ? repo.padEnd(6).slice(0, 18) : REPOS[1].label;
+        changed += await updateOne(label, repo, gameDir, token, kind);
+      }
     } else {
       console.log('  ゲーム   フォルダが見つからないので飛ばしました');
       console.log('      npm run update -- --game="ゲームのフォルダ" で指定できます');

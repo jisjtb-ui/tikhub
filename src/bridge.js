@@ -34,6 +34,11 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+/** 画面に出すフォルダ名などをそのまま埋め込まないための最小限の処理。 */
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 /** ゲームのフォルダか。名前ではなく中身で判断する (フォルダ名は自由に変えられるため)。 */
 function looksLikeGame(dir) {
   try {
@@ -63,7 +68,7 @@ function childDirs(dir) {
 }
 
 /**
- * ゲームのフォルダを探す。
+ * ゲームのフォルダを**すべて**探す。
  *
  * 起動した場所から上へ 3 階層たどり、それぞれの中のフォルダを見ます。
  * ZIP を解凍すると `tikhub-main\tikhub-main\` のように同じ名前が二重になり、
@@ -72,23 +77,88 @@ function childDirs(dir) {
  * 判定はフォルダ名ではなく中身 (index.html と js/game.js があるか) で行うので、
  * フォルダの名前を変えていても見つかります。
  *
- * @returns {string|null} 見つからなければ null (中継だけを行う)
+ * 1 つに絞らないのは、ゲームを複数置いている人がいるためです。見つけた全部を
+ * 配信して、どれを開くかはブラウザ側で選んでもらいます。
+ *
+ * @returns {string[]} 近い場所にあるものから順に。見つからなければ空配列
  */
-export function findGameDir(startDir = process.cwd()) {
+export function findGameDirs(startDir = process.cwd(), limit = 8) {
   let dir = path.resolve(startDir);
+  const found = [];
 
-  for (let level = 0; level < 4; level += 1) {
+  const add = (candidate) => {
+    if (!looksLikeGame(candidate)) return;
+    const resolved = path.resolve(candidate);
+    if (!found.includes(resolved)) found.push(resolved);
+  };
+
+  for (let level = 0; level < 4 && found.length < limit; level += 1) {
     for (const candidate of childDirs(dir)) {
-      if (looksLikeGame(candidate)) return candidate;
+      add(candidate);
       // ZIP の二重フォルダ (foo/foo/) にも 1 階層だけ潜る
-      const nested = path.join(candidate, path.basename(candidate));
-      if (looksLikeGame(nested)) return nested;
+      add(path.join(candidate, path.basename(candidate)));
     }
     const up = path.dirname(dir);
     if (up === dir) break;              // ドライブの一番上まで来た
     dir = up;
   }
-  return null;
+  return found.slice(0, limit);
+}
+
+/**
+ * ゲームのフォルダを 1 つ探す。複数あるときは最初の 1 つ。
+ * @returns {string|null} 見つからなければ null (中継だけを行う)
+ */
+export function findGameDir(startDir = process.cwd()) {
+  return findGameDirs(startDir, 1)[0] ?? null;
+}
+
+/** URL に使える名前へ均す。 */
+function slug(text) {
+  return String(text).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** index.html の <title> を読む。画面の名前をそのまま選択肢に出すため。 */
+function readTitle(dir) {
+  try {
+    const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8').slice(0, 8192);
+    const match = /<title>([^<]{1,80})<\/title>/i.exec(html);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * フォルダから、そのゲームの id と表示名を作る。
+ *
+ * id は URL の一部になります (http://127.0.0.1:8787/circlebattle/)。
+ * package.json の name を使うのは、フォルダ名を変えていても
+ * 同じ URL になるようにするためです。
+ *
+ * @returns {{dir:string, id:string, title:string}}
+ */
+export function readGameInfo(dir) {
+  let name = null;
+  try {
+    name = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name || null;
+  } catch {
+    /* package.json が無くても構わない */
+  }
+  const id = slug(name || path.basename(dir)) || 'game';
+  return { dir: path.resolve(dir), id, title: readTitle(dir) || name || path.basename(dir) };
+}
+
+/** 同じ id が重なったら後ろに連番を付ける (同じゲームを 2 つ置いている場合)。 */
+export function toGameList(dirs) {
+  const games = [];
+  for (const dir of dirs) {
+    const info = readGameInfo(dir);
+    let id = info.id;
+    for (let n = 2; games.some((g) => g.id === id); n += 1) id = `${info.id}-${n}`;
+    games.push({ ...info, id });
+  }
+  return games;
 }
 
 function statusPage(port) {
@@ -106,6 +176,29 @@ code{background:#000;padding:3px 8px;border-radius:5px}a{color:#7cc7ff}</style>
 </ul>
 <p>ゲーム画面を直接開いた場合は、自動で <code>http://127.0.0.1:${port}/events</code> に繋ぎにいきます。</p>
 <p><a href="/health">/health</a> で状態を確認できます。</p>`;
+}
+
+/** ゲームが複数見つかったときに出す選択画面。 */
+function chooserPage(games) {
+  const items = games.map((game) => `
+  <li><a href="/${game.id}/">
+    <b>${escapeHtml(game.title)}</b>
+    <span>/${escapeHtml(game.id)}/</span>
+    <em>${escapeHtml(game.dir)}</em>
+  </a></li>`).join('');
+
+  return `<!doctype html><meta charset="utf-8"><title>TikTok LIVE Event Server</title>
+<style>body{font-family:system-ui,sans-serif;background:#12101a;color:#eee;padding:48px;line-height:1.7}
+h1{letter-spacing:.06em}p{color:#a9a5c0}ul{list-style:none;padding:0;max-width:640px}
+li{margin:12px 0}a{display:block;padding:16px 20px;border:1px solid #33305a;border-radius:12px;
+background:#1a1830;color:#eee;text-decoration:none}a:hover{background:#242145;border-color:#5b57a8}
+b{font-size:20px;display:block}span{color:#7cc7ff;font-size:13px}em{display:block;color:#6f6b8d;font-size:12px;font-style:normal;margin-top:4px}
+code{background:#000;padding:3px 8px;border-radius:5px}</style>
+<h1>どのゲームを開きますか</h1>
+<p>ゲームのフォルダが ${games.length} つ見つかりました。配信に使うほうを選んでください。</p>
+<ul>${items}</ul>
+<p>1 つだけにしたいときは <code>npm start -- --game="フォルダ"</code> で指定できます。
+イベントの中継 (<code>/events</code>) はどちらのゲームからでも同じものを受け取れます。</p>`;
 }
 
 /**
@@ -137,9 +230,14 @@ function readJson(req, limit = 4096) {
  *   live … 接続先を差し替えるための操作口 (createLiveController)。
  *          渡すとブラウザから URL を貼り付けて接続できるようになる。
  */
-export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, live = null, logger }) {
+export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, games = null, live = null, logger }) {
   const clients = new Set();
   let keepalive = null;
+
+  // gameDir (1 つ) でも games (複数) でも受け付ける。
+  // 複数見つかったときは、それぞれを /<id>/ で配信し、/ で選ばせる。
+  const gameList = games && games.length ? games : (gameDir ? toGameList([gameDir]) : []);
+  const byId = new Map(gameList.map((game) => [game.id, game]));
 
   function liveState() {
     return live ? live.getState() : { status: 'unknown' };
@@ -153,10 +251,10 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
   // 接続先が変わったらブラウザへ知らせる (画面の表示を切り替えるため)
   live?.onChange((state) => push('status', state));
 
-  function sendFile(res, filePath) {
-    // gameDir の外へ出るリクエストは拒否する
+  function sendFile(res, dir, filePath) {
+    // ゲームのフォルダの外へ出るリクエストは拒否する
     const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(gameDir) + path.sep)) {
+    if (!resolved.startsWith(path.resolve(dir) + path.sep)) {
       res.writeHead(403).end();
       return;
     }
@@ -196,7 +294,8 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
       res.end(JSON.stringify({
         ok: true,
         clients: clients.size,
-        game: Boolean(gameDir),
+        game: gameList.length > 0,
+        games: gameList.map((game) => ({ id: game.id, title: game.title, dir: game.dir })),
         control: Boolean(live),
         live: liveState(),
       }));
@@ -266,26 +365,61 @@ export function createBridge({ port = 8787, host = '127.0.0.1', gameDir = null, 
       return;
     }
 
-    if (!gameDir) {
+    if (gameList.length === 0) {
       res.writeHead(reqPath === '/' ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(reqPath === '/' ? statusPage(port) : '');
       return;
     }
 
-    sendFile(res, path.join(gameDir, reqPath === '/' ? 'index.html' : reqPath));
+    // /<id>/... はそのゲームのフォルダから配信する。
+    // ゲームが 1 つでも複数でも同じ URL で開けるようにしてあります。
+    const scoped = /^\/([^/]+)(\/.*)?$/.exec(reqPath);
+    if (scoped && byId.has(scoped[1])) {
+      const game = byId.get(scoped[1]);
+      if (!scoped[2]) {
+        // 末尾の / が無いと css/js の相対パスが 1 階層ずれるので付け直す
+        res.writeHead(302, { Location: `/${game.id}/` }).end();
+        return;
+      }
+      sendFile(res, game.dir, path.join(game.dir, scoped[2] === '/' ? 'index.html' : scoped[2]));
+      return;
+    }
+
+    if (reqPath === '/') {
+      // 1 つしか無いならそのまま開く (今までと同じ)。複数なら選ばせる。
+      if (gameList.length === 1) {
+        sendFile(res, gameList[0].dir, path.join(gameList[0].dir, 'index.html'));
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(chooserPage(gameList));
+      }
+      return;
+    }
+
+    if (gameList.length === 1) {
+      sendFile(res, gameList[0].dir, path.join(gameList[0].dir, reqPath));
+      return;
+    }
+
+    // 複数あるときは、どのゲームのファイルか決められない
+    res.writeHead(404).end();
   });
 
   return {
     get clientCount() {
       return clients.size;
     },
-    gameDir,
+    gameDir: gameList.length ? gameList[0].dir : null,
+    games: gameList,
 
     start() {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, host, () => {
           server.removeListener('error', reject);
+          // port に 0 を渡すと OS が空きポートを選ぶので、実際の番号を返す
+          const actual = server.address();
+          if (actual && typeof actual === 'object') port = actual.port;
           // プロキシや中間層が切らないよう、定期的にコメント行を送る
           keepalive = setInterval(() => {
             for (const res of clients) res.write(': ping\n\n');
