@@ -322,8 +322,14 @@ async function main() {
         changed += await updateOne(label, repo, gameDir, token, kind, override);
       }
     } else {
-      console.log('  ゲーム   フォルダが見つからないので飛ばしました');
-      console.log('      npm run update -- --game="ゲームのフォルダ" で指定できます');
+      // 「見つからない」だけだと、まだ 1 つも持っていない人が次に何をすれば
+      // よいのか分かりません。取得先をそのまま出します。
+      console.log('  ゲーム   フォルダが見つかりませんでした');
+      console.log('      ゲームをこのフォルダの隣に置いてください。まだ無ければ:');
+      for (const repo of GAME_REPOS) {
+        console.log(`        https://github.com/${OWNER}/${repo}/archive/refs/heads/main.zip`);
+      }
+      console.log('      置いた場所が違うときは --game="ゲームのフォルダ" で指定できます');
     }
   } catch (err) {
     console.error(`\n更新できませんでした: ${err.message}`);
