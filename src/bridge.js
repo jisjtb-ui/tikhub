@@ -50,6 +50,19 @@ function looksLikeGame(dir) {
 }
 
 /** dir の中にあるフォルダを、ゲームらしい名前のものから順に返す。 */
+/**
+ * ゲームを入れておくためのフォルダの名前。
+ *
+ * tikhub の隣に並べる形だと「どこに置けばいいのか」が分かりにくいので、
+ * tikhub の中の games/ に入れておく形も使えるようにしてあります。
+ * この名前のフォルダは、それ自体がゲームでなくても中を見にいきます。
+ */
+const GAME_CONTAINERS = ['games', 'game', 'ゲーム'];
+
+function isContainer(dir) {
+  return GAME_CONTAINERS.includes(path.basename(dir).toLowerCase());
+}
+
 function childDirs(dir) {
   let entries;
   try {
@@ -82,6 +95,8 @@ function childDirs(dir) {
  *
  * @returns {string[]} 近い場所にあるものから順に。見つからなければ空配列
  */
+export { GAME_CONTAINERS };
+
 export function findGameDirs(startDir = process.cwd(), limit = 8) {
   let dir = path.resolve(startDir);
   const found = [];
@@ -97,6 +112,13 @@ export function findGameDirs(startDir = process.cwd(), limit = 8) {
       add(candidate);
       // ZIP の二重フォルダ (foo/foo/) にも 1 階層だけ潜る
       add(path.join(candidate, path.basename(candidate)));
+      // games/ のような入れ物なら、その中も見る
+      if (isContainer(candidate)) {
+        for (const inner of childDirs(candidate)) {
+          add(inner);
+          add(path.join(inner, path.basename(inner)));
+        }
+      }
     }
     const up = path.dirname(dir);
     if (up === dir) break;              // ドライブの一番上まで来た

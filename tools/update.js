@@ -22,7 +22,7 @@ import crypto from 'node:crypto';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 
-import { findGameDirs } from '../src/bridge.js';
+import { findGameDirs, GAME_CONTAINERS } from '../src/bridge.js';
 
 const OWNER = 'jisjtb-ui';
 
@@ -78,8 +78,11 @@ function gameRepoFor(dir) {
   return REPOS[1].repo;
 }
 
-/** 上書き対象から外すもの。利用者が置いたファイルを消さないため。 */
-const KEEP = new Set(['.env', 'node_modules', '.git', 'bgm']);
+/**
+ * 上書き対象から外すもの。利用者が置いたファイルを消さないため。
+ * games/ はゲーム本体を入れる場所なので、tikhub の更新では触りません。
+ */
+const KEEP = new Set(['.env', 'node_modules', '.git', 'bgm', ...GAME_CONTAINERS]);
 
 function hash(file) {
   try {
@@ -323,13 +326,16 @@ async function main() {
       }
     } else {
       // 「見つからない」だけだと、まだ 1 つも持っていない人が次に何をすれば
-      // よいのか分かりません。取得先をそのまま出します。
+      // よいのか分かりません。**置き場所を実際に作って**、取得先も出します。
+      const box = path.join(here, GAME_CONTAINERS[0]);
+      fs.mkdirSync(box, { recursive: true });
+
       console.log('  ゲーム   フォルダが見つかりませんでした');
-      console.log('      ゲームをこのフォルダの隣に置いてください。まだ無ければ:');
+      console.log(`      ここに展開して入れてください: ${box}`);
       for (const repo of GAME_REPOS) {
         console.log(`        https://github.com/${OWNER}/${repo}/archive/refs/heads/main.zip`);
       }
-      console.log('      置いた場所が違うときは --game="ゲームのフォルダ" で指定できます');
+      console.log('      次からは自動で見つけて更新します');
     }
   } catch (err) {
     console.error(`\n更新できませんでした: ${err.message}`);

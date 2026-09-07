@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { branchCandidates, archiveUrl, gameRepoFor, servedRef } from '../tools/update.js';
+import { GAME_CONTAINERS } from '../src/bridge.js';
 
 // ---------------------------------------------------------- ブランチの候補
 
@@ -79,4 +80,15 @@ test('package.json の name でゲームを見分ける', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test('games/ は tikhub の更新で上書きされない', async () => {
+  // ゲーム本体を入れる場所なので、tikhub 側の更新では触りません。
+  // KEEP は外に出していないので、名前が一致していることだけ確かめます。
+  const src = fs.readFileSync(new URL('../tools/update.js', import.meta.url), 'utf8');
+  const keep = src.match(/const KEEP = new Set\(\[([^\]]*)\]/);
+  assert.ok(keep, 'KEEP が見つからない');
+  assert.ok(keep[1].includes('GAME_CONTAINERS'), 'games/ が守られていない');
+  assert.ok(GAME_CONTAINERS.includes('games'));
 });

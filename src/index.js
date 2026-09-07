@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import process from 'node:process';
 
 import { buildConfig, loadDotEnv } from './config.js';
@@ -131,7 +132,8 @@ async function main() {
         // 詰まったときに、どこを直せばいいかが分かるようにするため。
         logger.raw('');
         logger.raw(color.yellow('  ※ ゲームのフォルダが見つかりませんでした。'));
-        logger.raw(color.dim(`     探した場所: ${process.cwd()} から上へ 3 階層`));
+        logger.raw(color.dim(`     ここに入れるのがいちばん簡単です: ${path.join(process.cwd(), 'games')}`));
+        logger.raw(color.dim(`     (探しているのは ${process.cwd()} から上へ 3 階層と、その games/ の中)`));
         logger.raw(color.dim('     ゲームのフォルダには index.html と js/game.js が必要です。'));
         logger.raw(color.dim('     見つからない場合は  npm start -- --game="ゲームのフォルダ"  で直接指定できます。'));
       }

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createBridge, findGameDirs, readGameInfo, toGameList } from '../src/bridge.js';
+import { createBridge, findGameDirs, readGameInfo, toGameList, GAME_CONTAINERS } from '../src/bridge.js';
 
 /** ゲームらしいフォルダを作る (index.html と js/game.js があること)。 */
 function makeGame(root, name, { title = null, pkgName = null } = {}) {
@@ -180,4 +180,55 @@ test('/events と /health はゲームが何個でも同じ', async () => {
     await server.close();
     ws.cleanup();
   }
+});
+
+
+// ------------------------------------------------ tikhub の中の games/
+
+test('tikhub の中の games/ に入れたゲームも見つかる', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-box-'));
+  try {
+    const tikhub = path.join(root, 'tikhub');
+    fs.mkdirSync(path.join(tikhub, 'games'), { recursive: true });
+    makeGame(path.join(tikhub, 'games'), 'circlebattle', { pkgName: 'circlebattle' });
+    makeGame(path.join(tikhub, 'games'), 'kawaiivsbeautiful', { pkgName: 'kawaiivsbeautiful' });
+
+    const found = findGameDirs(tikhub);
+    assert.equal(found.length, 2, 'games/ の中を見ていない');
+    assert.ok(found.every((d) => d.includes(path.join('games', ''))));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('games/ の中に ZIP の二重フォルダがあっても見つかる', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-box2-'));
+  try {
+    const box = path.join(root, 'tikhub', 'games', 'circlebattle-main');
+    fs.mkdirSync(box, { recursive: true });
+    makeGame(box, 'circlebattle-main', { pkgName: 'circlebattle' });
+
+    const found = findGameDirs(path.join(root, 'tikhub'));
+    assert.equal(found.length, 1, '二重フォルダを見ていない');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('隣に並べる置き方も今までどおり使える', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-side-'));
+  try {
+    const tikhub = path.join(root, 'tikhub');
+    fs.mkdirSync(tikhub, { recursive: true });
+    makeGame(root, 'circlebattle', { pkgName: 'circlebattle' });
+
+    assert.equal(findGameDirs(tikhub).length, 1, '隣のゲームが見つからなくなった');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('入れ物として扱う名前が決まっている', () => {
+  assert.ok(GAME_CONTAINERS.includes('games'));
+  assert.ok(GAME_CONTAINERS.includes('game'));
 });
