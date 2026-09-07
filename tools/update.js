@@ -3,6 +3,8 @@
  * tikhub とゲームを、その場で最新版に更新する。
  *
  *   npm run update
+ *   npm run update -- --branch=claude/xxx     ブランチを指定する
+ *   npm run update -- --game="ゲームのフォルダ"  ゲームを 1 つだけ指定する
  *
  * ZIP を落とし直してフォルダを置き換える必要がなくなります。git も要りません。
  *
@@ -23,6 +25,34 @@ import { execFileSync } from 'node:child_process';
 import { findGameDirs } from '../src/bridge.js';
 
 const OWNER = 'jisjtb-ui';
+
+/**
+ * どのブランチから取ってくるか。
+ *
+ * `main` を決め打ちにしていたのが原因で、次の 2 つが起きていました:
+ *
+ *   - circlebattle には main がまだ無いので 404 になり、
+ *     「非公開のようです」という的外れな案内が出ていた
+ *   - tikhub の main が古いままだと、**新しい方を古い方で上書き**してしまう
+ *
+ * そこで、リポジトリごとに既定ブランチを GitHub に聞いてから取ります。
+ * 順に試して、最初に取れたものを使います:
+ *
+ *   1. --branch= / .env の GITHUB_BRANCH (指定があれば最優先)
+ *   2. そのリポジトリの既定ブランチ (GitHub に聞く)
+ *   3. main
+ *   4. master
+ */
+function branchCandidates(override, fallback) {
+  return [...new Set([override, fallback, 'main', 'master'].filter(Boolean))];
+}
+
+/** 書庫の URL。ブランチ名に / が入っていても GitHub はそのまま受け付けます。 */
+function archiveUrl(repo, branch, kind) {
+  const ext = kind === 'tar' ? 'tar.gz' : 'zip';
+  return `https://github.com/${OWNER}/${repo}/archive/refs/heads/${branch}.${ext}`;
+}
+
 const REPOS = [
   { label: 'tikhub', repo: 'tikhub' },
   { label: 'ゲーム ', repo: 'kawaiivsbeautiful' },
@@ -91,42 +121,104 @@ function extract(archivePath, intoDir, kind) {
 const UA = { 'User-Agent': 'tikhub-update' };
 
 /**
- * 最新のアーカイブを落とす。
+ * そのリポジトリの既定ブランチを GitHub に聞く。
+ * 聞けなければ null を返し、呼ぶ側は main / master を試します。
+ */
+async function defaultBranch(repo, token) {
+  const base = { ...UA, Accept: 'application/vnd.github+json' };
+  // 認証なしを先に試します。公開リポジトリならこれで足りますし、
+  // .env に古いトークンが残っていても巻き込まれません
+  // (無効なトークンを付けると、公開リポジトリでも 401 で弾かれます)。
+  const attempts = token ? [base, { ...base, Authorization: `Bearer ${token}` }] : [base];
+
+  for (const headers of attempts) {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${OWNER}/${repo}`, { headers });
+      if (!res.ok) continue;
+      const info = await res.json();
+      if (info.default_branch) return info.default_branch;
+    } catch {
+      /* ネットワークが不調でも、下の候補で続けます */
+    }
+  }
+  return null;
+}
+
+/**
+ * 1 つのブランチから書庫を落とす。無ければ null を返します。
  *
  * まず**認証なし**で公開用の URL を叩きます。公開リポジトリならこれで取れますし、
  * .env に古いトークンが残っていても巻き込まれません
  * (無効なトークンを付けると、公開リポジトリでも 401 で弾かれます)。
  *
- * これが 404 になるのは非公開のときなので、そのときだけトークンを付けて
- * API から取り直します。
+ * これが 404 になるのは非公開かブランチ違いのときなので、
+ * そのときだけトークンを付けて API から取り直します。
  */
-async function download(repo, token, kind) {
-  const ext = kind === 'tar' ? 'tar.gz' : 'zip';
-  const publicUrl = `https://github.com/${OWNER}/${repo}/archive/refs/heads/main.${ext}`;
-
-  let res = await fetch(publicUrl, { headers: UA, redirect: 'follow' });
+async function downloadBranch(repo, branch, token, kind, notes) {
+  let res = await fetch(archiveUrl(repo, branch, kind), { headers: UA, redirect: 'follow' });
 
   if (!res.ok && token) {
-    const apiUrl = `https://api.github.com/repos/${OWNER}/${repo}/${kind === 'tar' ? 'tarball' : 'zipball'}/main`;
-    res = await fetch(apiUrl, {
+    const kindPath = kind === 'tar' ? 'tarball' : 'zipball';
+    res = await fetch(`https://api.github.com/repos/${OWNER}/${repo}/${kindPath}/${branch}`, {
       headers: { ...UA, Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` },
       redirect: 'follow',
     });
+    // トークンが駄目でも、ここでは止めません。別のブランチなら認証なしで
+    // 取れることがあるためです。全部だめだったときに download() が伝えます。
     if (res.status === 401 || res.status === 403) {
-      throw new Error(`${repo}: トークンが受け付けられませんでした。.env の GITHUB_TOKEN を確認するか、行ごと消してください。`);
+      notes.badToken = true;
+      return null;
     }
   }
 
-  if (res.status === 404) {
-    throw new Error(token
-      ? `${repo} を取得できません。トークンにこのリポジトリの権限があるか確認してください。`
-      : `${repo} が非公開のようです。GITHUB_TOKEN が必要です。`);
-  }
+  if (res.status === 404) return null;                 // このブランチは無い
   if (!res.ok) throw new Error(`${repo}: ダウンロードに失敗しました (HTTP ${res.status})`);
 
+  const ext = kind === 'tar' ? 'tar.gz' : 'zip';
   const file = path.join(os.tmpdir(), `${repo}-${Date.now()}.${ext}`);
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
   return file;
+}
+
+/** 候補を順に試して、最初に取れたものを使う。 */
+async function download(repo, token, kind, override) {
+  // ブランチを指定されたときは、それ以外を試しません。
+  // 指定したのに別のものが入ってしまうのが一番困るためです。
+  const found = override ? null : await defaultBranch(repo, token);
+  const branches = override ? [override] : branchCandidates(null, found);
+  const notes = { badToken: false };
+
+  for (const branch of branches) {
+    const file = await downloadBranch(repo, branch, token, kind, notes);
+    if (file) return { file, branch };
+  }
+
+  // どの候補でも取れなかった。原因を切り分けて伝えます
+  if (found || override) {
+    throw new Error(`${repo}: ブランチが見つかりません (試したもの: ${branches.join(', ')})。`
+      + '\n      npm run update -- --branch="ブランチ名" で指定できます。');
+  }
+  if (notes.badToken) {
+    throw new Error(`${repo}: トークンが受け付けられませんでした。.env の GITHUB_TOKEN を確認するか、行ごと消してください。`);
+  }
+  throw new Error(token
+    ? `${repo} を取得できません。トークンにこのリポジトリの権限があるか確認してください。`
+    : `${repo} が非公開のようです。GITHUB_TOKEN が必要です。`);
+}
+
+/**
+ * GitHub が実際に返したブランチ名を、展開されたフォルダ名から読む。
+ *
+ * 頼んだブランチ名をそのまま表示すると嘘になることがあります。GitHub は
+ * `master` を**既定ブランチへ黙って読み替える**ので、master が無いリポジトリでも
+ * 200 が返り、中身は既定ブランチのものになります。
+ * どこから入れたのかが分からないと、古いブランチで上書きしても気づけません。
+ *
+ * フォルダ名は `<repo>-<ref>` で、ref の / は - になっています。
+ */
+function servedRef(childDir, repo) {
+  const name = path.basename(childDir);
+  return name.startsWith(`${repo}-`) ? name.slice(repo.length + 1) : name;
 }
 
 /** GitHub の zipball は 1 階層挟むので、その中へ降りる。 */
@@ -157,16 +249,19 @@ function overlay(from, to, stats) {
   return stats;
 }
 
-async function updateOne(label, repo, targetDir, token, kind) {
+async function updateOne(label, repo, targetDir, token, kind, override) {
   process.stdout.write(`  ${label}  `);
-  const archive = await download(repo, token, kind);
+  const { file: archive } = await download(repo, token, kind, override);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tikhub-update-'));
   try {
     extract(archive, tmp, kind);
-    const stats = overlay(singleChild(tmp), targetDir, { changed: [], root: targetDir });
+    const child = singleChild(tmp);
+    // 頼んだ名前ではなく、**実際に返ってきたもの**を出します
+    const branch = servedRef(child, repo);
+    const stats = overlay(child, targetDir, { changed: [], root: targetDir });
     console.log(stats.changed.length === 0
-      ? '最新でした'
-      : `${stats.changed.length} ファイルを更新`);
+      ? `最新でした  (${branch})`
+      : `${stats.changed.length} ファイルを更新  (${branch})`);
     stats.changed.slice(0, 10).forEach((f) => console.log(`      ${f}`));
     if (stats.changed.length > 10) console.log(`      … ほか ${stats.changed.length - 10} 件`);
     return stats.changed.length;
@@ -205,12 +300,18 @@ async function main() {
   const arg = process.argv.find((a) => a.startsWith('--game='));
   const gameDirs = arg ? [arg.slice('--game='.length)] : findGameDirs(here);
 
+  // ブランチの指定。開発中のブランチから入れたいときに使います。
+  const branchArg = process.argv.find((a) => a.startsWith('--branch='));
+  const override = branchArg
+    ? branchArg.slice('--branch='.length)
+    : (process.env.GITHUB_BRANCH || '').trim() || null;
+
   const kind = hasTar() ? 'tar' : 'zip';
-  console.log('最新版に更新します\n');
+  console.log(override ? `最新版に更新します (ブランチ: ${override})\n` : '最新版に更新します\n');
 
   let changed = 0;
   try {
-    changed += await updateOne(REPOS[0].label, REPOS[0].repo, here, token, kind);
+    changed += await updateOne(REPOS[0].label, REPOS[0].repo, here, token, kind, override);
     if (gameDirs.length) {
       for (const gameDir of gameDirs) {
         // どのゲームのフォルダかは中身で判断する。取り違えると
@@ -218,7 +319,7 @@ async function main() {
         const repo = gameRepoFor(gameDir);
         // 複数あるときは、どのゲームを更新しているのか分かるように名前を出す
         const label = gameDirs.length > 1 ? repo.padEnd(6).slice(0, 18) : REPOS[1].label;
-        changed += await updateOne(label, repo, gameDir, token, kind);
+        changed += await updateOne(label, repo, gameDir, token, kind, override);
       }
     } else {
       console.log('  ゲーム   フォルダが見つからないので飛ばしました');
@@ -240,7 +341,15 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+export { branchCandidates, archiveUrl, gameRepoFor, servedRef };
+
+// 直接実行されたときだけ動かす (テストから読み込んでも更新は走りません)
+const invokedDirectly = process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+
+if (!invokedDirectly) {
+  // 読み込まれただけ。何もしません。
+} else main().catch((err) => {
   console.error(err.message);
   process.exitCode = 1;
 });
