@@ -17,6 +17,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import process from 'node:process';
@@ -355,9 +356,20 @@ async function main() {
 
 export { branchCandidates, archiveUrl, gameRepoFor, servedRef };
 
-// 直接実行されたときだけ動かす (テストから読み込んでも更新は走りません)
+/**
+ * 直接実行されたときだけ動かす (テストから読み込んでも更新は走りません)。
+ *
+ * **fileURLToPath を通します。** URL の pathname をそのまま使うと、
+ *
+ *   - フォルダ名の空白や記号が %20 のまま残る
+ *     ("tikhub-main (4)" -> "/tikhub-main%20(4)")
+ *   - Windows ではドライブレターの前に / が付く ("/D:/Users/...")
+ *
+ * ので、argv と一致せず**何も出力せずに終了**します。
+ * (以前これで「npm run update が無反応」になりました。)
+ */
 const invokedDirectly = process.argv[1] &&
-  path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (!invokedDirectly) {
   // 読み込まれただけ。何もしません。

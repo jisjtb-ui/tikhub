@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import { branchCandidates, archiveUrl, gameRepoFor, servedRef } from '../tools/update.js';
 import { GAME_CONTAINERS } from '../src/bridge.js';
@@ -122,4 +123,39 @@ test('入口はどこから開いても tikhub のフォルダで動く', () => 
 
   const sh = fs.readFileSync(new URL('../update.sh', import.meta.url), 'utf8');
   assert.match(sh, /cd "\$\(dirname "\$0"\)"/, 'update.sh がフォルダを移動していない');
+});
+
+// ------------------------------------------- 空白の入ったフォルダで動くか
+
+/**
+ * ダウンロードした ZIP を展開すると、フォルダ名はよく
+ * `tikhub-main (4)` のように**空白と記号入り**になります。
+ *
+ * 直接実行の判定に URL の pathname をそのまま使っていた頃は、空白が
+ * `%20` のまま残って argv と一致せず、**何も出力せずに終了**していました
+ * (Windows ではさらに `/D:/...` とドライブレターの前に / が付きます)。
+ * 無反応なので、動いていないことにも気づけません。
+ */
+test('空白や記号が入ったパスから実行しても動く', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tikhub-'));
+  const dir = path.join(root, 'tikhub-main (4)');
+  fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+
+  const from = new URL('../', import.meta.url);
+  fs.copyFileSync(new URL('tools/update.js', from), path.join(dir, 'tools', 'update.js'));
+  fs.copyFileSync(new URL('src/bridge.js', from), path.join(dir, 'src', 'bridge.js'));
+
+  // tikhub のフォルダ**以外**から呼びます。ネットワークへ出る前に
+  // 「tikhub のフォルダで実行してください」で止まるので、これだけで
+  // 「main() まで届いたか」が分かります。
+  const result = spawnSync(process.execPath, [path.join(dir, 'tools', 'update.js')], {
+    cwd: root, encoding: 'utf8'
+  });
+
+  const output = (result.stdout || '') + (result.stderr || '');
+  assert.notEqual(output.trim(), '', '何も出力せずに終わっている (直接実行と判定されていない)');
+  assert.match(output, /tikhub のフォルダで実行してください/);
+
+  fs.rmSync(root, { recursive: true, force: true });
 });
