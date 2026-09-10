@@ -92,3 +92,34 @@ test('games/ は tikhub の更新で上書きされない', async () => {
   assert.ok(keep[1].includes('GAME_CONTAINERS'), 'games/ が守られていない');
   assert.ok(GAME_CONTAINERS.includes('games'));
 });
+
+// ------------------------------------------------ ダブルクリックの入口
+
+/**
+ * npm を経由しない入口を 2 つ置いてあります。
+ *
+ * Windows の PowerShell は既定でスクリプトの実行を止めるので、
+ * `npm run update` が「このシステムではスクリプトの実行が無効になっている」
+ * で止まることがあります。そのとき更新する手段が無くなるのを避けるためです。
+ */
+test('ダブルクリックの入口が更新スクリプトを指している', () => {
+  for (const name of ['update.cmd', 'update.sh']) {
+    const file = new URL('../' + name, import.meta.url);
+    assert.ok(fs.existsSync(file), `${name} が無い`);
+
+    const body = fs.readFileSync(file, 'utf8');
+    assert.match(body, /tools[\\/]update\.js/, `${name} が更新スクリプトを呼んでいない`);
+    // 引数をそのまま渡す (--branch= などが使えなくならないように)
+    assert.ok(body.includes('%*') || body.includes('"$@"'), `${name} が引数を渡していない`);
+  }
+});
+
+test('入口はどこから開いても tikhub のフォルダで動く', () => {
+  // 更新スクリプトは process.cwd() を見るので、置いてある場所へ移動しないと
+  // 「tikhub のフォルダで実行してください」で止まります。
+  const cmd = fs.readFileSync(new URL('../update.cmd', import.meta.url), 'utf8');
+  assert.match(cmd, /cd \/d "%~dp0"/, 'update.cmd がフォルダを移動していない');
+
+  const sh = fs.readFileSync(new URL('../update.sh', import.meta.url), 'utf8');
+  assert.match(sh, /cd "\$\(dirname "\$0"\)"/, 'update.sh がフォルダを移動していない');
+});

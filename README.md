@@ -225,11 +225,34 @@ TikTok LIVE Event Server
 
 **ZIP を落とし直す必要はありません。**
 
-```bash
-npm run update
-```
+| やり方 | どうする |
+| --- | --- |
+| **Windows** | フォルダの中の **`update.cmd` をダブルクリック** |
+| macOS / Linux | `./update.sh` |
+| ターミナルから | `npm run update` |
 
 tikhub とゲームの両方を、その場で最新版に書き換えます。git も不要です。
+
+### `npm run update` が動かないとき
+
+Windows の PowerShell は、既定で**スクリプトの実行を止めます**。そのため
+`npm run update` がこう出て止まることがあります。
+
+```
+npm : このシステムではスクリプトの実行が無効になっているため、
+      ファイル C:\Program Files\nodejs\npm.ps1 を読み込むことができません。
+```
+
+これは tikhub 側ではなく Windows の設定です。**`update.cmd` をダブルクリック**
+してください。npm を通さず node を直接呼ぶので、この設定に関係なく動きます。
+
+（設定のほうを変えたい場合は、PowerShell を開いて
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` を 1 回実行します。
+どちらでも構いませんが、変えなくても `update.cmd` で更新できます。）
+
+`update.cmd` は**どこから開いても**自分の置いてあるフォルダで動きます。
+`--branch=` などの指定も、ターミナルから `update.cmd --branch=...` と
+書けばそのまま渡ります。
 
 ```
 最新版に更新します
@@ -427,6 +450,8 @@ src/
     mock.js         TikTok に接続しない擬似イベント源
 tools/
   update.js         その場で最新版に更新する (npm run update)
+update.cmd          ↑ をダブルクリックで実行する入口 (Windows)
+update.sh           ↑ の macOS / Linux 版
 test/
   target.test.js    接続先解決のテスト (node --test)
 docs/
